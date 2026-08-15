@@ -45,12 +45,79 @@
   </head>
   <body>
     <header class="topbar">
-      <div class="wordmark"><span class="dim">desktop-comfyui-</span>server</div>
+      <div class="wordmark">
+        <!-- The app's own mark, the same one the icon and the installer use. -->
+        <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+          <rect width="32" height="32" rx="7" fill="var(--primary)" />
+          <g stroke="var(--primary-foreground)" stroke-width="2" stroke-linecap="round" fill="none">
+            <path d="M10 10 L22 16 M10 22 L22 16" />
+          </g>
+          <g fill="var(--primary-foreground)">
+            <circle cx="10" cy="10" r="3.5" />
+            <circle cx="10" cy="22" r="3.5" />
+            <circle cx="22" cy="16" r="3.5" />
+          </g>
+        </svg>
+        <span><span class="dim">desktop-comfyui-</span>server</span>
+      </div>
 
       <div class="topbar-side">
         <p class="mono muted" id="comfy-url">&nbsp;</p>
 
         <button type="button" class="ghost" id="comfy-power">Start ComfyUI</button>
+
+        <!-- Everything the tray menu offers, for when the window is open. -->
+        <div class="menu">
+          <button
+            type="button"
+            class="ghost square"
+            id="desktop-open"
+            aria-haspopup="true"
+            aria-expanded="false"
+            data-i18n-title="desktop.title"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              aria-hidden="true"
+            >
+              <path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h10M18 18h2" />
+              <circle cx="16" cy="6" r="2" />
+              <circle cx="8" cy="12" r="2" />
+              <circle cx="16" cy="18" r="2" />
+            </svg>
+            <span class="sr-only" data-i18n="desktop.title">Desktop app</span>
+          </button>
+
+          <div class="popover" id="desktop-panel" hidden>
+            <p class="popover-head" data-i18n="desktop.title">Desktop app</p>
+
+            <label class="switch">
+              <input type="checkbox" id="desktop-accepting" />
+              <span data-i18n="desktop.accepting">Accept new work</span>
+            </label>
+            <p class="muted" data-i18n="desktop.acceptingNote"></p>
+
+            <label class="switch">
+              <input type="checkbox" id="desktop-autostart" />
+              <span data-i18n="desktop.autostart">Start when the computer starts</span>
+            </label>
+
+            <p class="popover-label" data-i18n="desktop.closeAction">Closing the window</p>
+            <div class="segmented text wide" id="desktop-close" role="group">
+              <button type="button" data-close-action="tray" data-i18n="desktop.toTray">
+                Keeps running
+              </button>
+              <button type="button" data-close-action="quit" data-i18n="desktop.quit">Quits</button>
+            </div>
+
+            <p class="muted" data-i18n="desktop.note"></p>
+            <p class="muted" id="desktop-note"></p>
+          </div>
+        </div>
 
         <!-- Filled in from the language list, so adding one is a single edit. -->
         <div

@@ -22,6 +22,18 @@ export type UpstreamConfig = {
   enabled: boolean;
 };
 
+/**
+ * How the desktop shell behaves. Kept here rather than on the Rust side so the
+ * settings page can edit it like anything else; the shell reads it back and
+ * applies it.
+ */
+export type DesktopSettings = {
+  /** Start the app when the machine starts. */
+  autostart: boolean;
+  /** What the window's close button does. */
+  closeAction: "tray" | "quit";
+};
+
 export type Settings = {
   activeWorkflow: string | null;
   /** Where ComfyUI is checked out. Empty until someone fills it in. */
@@ -30,6 +42,15 @@ export type Settings = {
   comfyCommand: string;
   /** Priority order: the first enabled entry is asked for work first. */
   upstreams: UpstreamConfig[];
+  /**
+   * False pauses new work: nothing is claimed from upstreams and a run started
+   * here is refused. Whatever is already running is left to finish.
+   *
+   * Stored rather than reset on start, because a pause is a decision — coming
+   * back up quietly claiming jobs again is the surprising behaviour.
+   */
+  accepting: boolean;
+  desktop: DesktopSettings;
 };
 
 const EMPTY: Settings = {
@@ -37,6 +58,8 @@ const EMPTY: Settings = {
   comfyDir: "",
   comfyCommand: "",
   upstreams: [],
+  accepting: true,
+  desktop: { autostart: false, closeAction: "tray" },
 };
 
 /**
@@ -87,6 +110,14 @@ function hostFromUrl(url: string): string {
 
 let cached: Settings | null = null;
 
+function normaliseDesktop(raw: unknown): DesktopSettings {
+  const value = (raw ?? {}) as Partial<DesktopSettings>;
+  return {
+    autostart: value.autostart === true,
+    closeAction: value.closeAction === "quit" ? "quit" : "tray",
+  };
+}
+
 function normalise(raw: unknown): Settings {
   const value = (raw ?? {}) as Partial<Settings>;
   const upstreams = Array.isArray(value.upstreams) ? value.upstreams : null;
@@ -98,6 +129,8 @@ function normalise(raw: unknown): Settings {
     // An empty stored array is a real choice ("I removed them all"), so only a
     // missing key falls back to the environment.
     upstreams: upstreams ?? upstreamsFromEnv(),
+    accepting: value.accepting !== false,
+    desktop: normaliseDesktop(value.desktop),
   };
 }
 

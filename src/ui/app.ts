@@ -93,6 +93,8 @@ type State = {
   };
   upstreams: UpstreamView[];
   settings: { comfyDir: string; comfyCommand: string };
+  accepting: boolean;
+  desktop: { autostart: boolean; closeAction: "tray" | "quit" };
   jobs: JobRecord[];
 };
 
@@ -131,6 +133,11 @@ const nodes = {
   comfyDir: el<HTMLInputElement>("comfy-dir"),
   comfyCommand: el<HTMLInputElement>("comfy-command"),
   settingsNote: el("settings-note"),
+  desktopOpen: el<HTMLButtonElement>("desktop-open"),
+  desktopPanel: el("desktop-panel"),
+  desktopAccepting: el<HTMLInputElement>("desktop-accepting"),
+  desktopAutostart: el<HTMLInputElement>("desktop-autostart"),
+  desktopNote: el("desktop-note"),
 };
 
 function esc(value: unknown): string {
@@ -285,6 +292,11 @@ function renderVitals(state: State): void {
     total === 0
       ? chip(t("vitals.agent"), t("vitals.standalone"))
       : chip(t("vitals.agent"), `${pad(healthy)}/${pad(total)}`, agentTone),
+    chip(
+      t("vitals.work"),
+      state.accepting ? t("vitals.accepting") : t("vitals.paused"),
+      state.accepting ? "ok" : "warn",
+    ),
   ];
 
   if (comfyProcess.managed) {
@@ -591,6 +603,45 @@ function syncSettings(state: State): void {
 }
 
 // ---------------------------------------------------------------------------
+// Desktop menu — the same switches the tray menu carries
+// ---------------------------------------------------------------------------
+
+/** Held while a switch is in flight, so a poll cannot flip it back. */
+let desktopBusy = false;
+
+function syncDesktop(state: State): void {
+  if (desktopBusy) return;
+  nodes.desktopAccepting.checked = state.accepting;
+  nodes.desktopAutostart.checked = state.desktop.autostart;
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-close-action]")) {
+    button.setAttribute(
+      "aria-pressed",
+      String(button.dataset["closeAction"] === state.desktop.closeAction),
+    );
+  }
+}
+
+function openDesktopMenu(open: boolean): void {
+  nodes.desktopPanel.hidden = !open;
+  nodes.desktopOpen.setAttribute("aria-expanded", String(open));
+  if (!open) setNote(nodes.desktopNote, "");
+}
+
+/** Send one switch, then let the next poll confirm it. */
+async function saveDesktop(path: string, body: unknown): Promise<void> {
+  desktopBusy = true;
+  const result = await post(path, body);
+  desktopBusy = false;
+
+  setNote(
+    nodes.desktopNote,
+    result.ok ? t("desktop.saved") : (result.error ?? t("desktop.saveFailed")),
+    !result.ok,
+  );
+  void poll();
+}
+
+// ---------------------------------------------------------------------------
 // Run form
 // ---------------------------------------------------------------------------
 
@@ -618,7 +669,8 @@ function syncForm(state: State): void {
     nodes.select.value = pick(state.activeWorkflow);
   }
 
-  nodes.submit.disabled = valid.length === 0;
+  nodes.submit.disabled = valid.length === 0 || !state.accepting;
+  nodes.submit.title = state.accepting ? "" : t("run.paused");
 
   const selected = state.workflows.find((summary) => summary.name === nodes.select.value);
   const slots = selected?.slots;
@@ -655,6 +707,7 @@ function render(state: State): void {
   syncServers(state);
   renderJobs(state);
   syncSettings(state);
+  syncDesktop(state);
   syncForm(state);
 }
 
@@ -987,6 +1040,37 @@ async function toggleComfy(): Promise<void> {
 
 nodes.comfyPower.addEventListener("click", () => void toggleComfy());
 nodes.comfyPower2.addEventListener("click", () => void toggleComfy());
+
+nodes.desktopOpen.addEventListener("click", () => {
+  openDesktopMenu(Boolean(nodes.desktopPanel.hidden));
+});
+
+// Anywhere outside closes it, which is what a menu is expected to do.
+document.addEventListener("click", (event) => {
+  if (nodes.desktopPanel.hidden) return;
+  const target = event.target as Node;
+  if (nodes.desktopPanel.contains(target) || nodes.desktopOpen.contains(target)) return;
+  openDesktopMenu(false);
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") openDesktopMenu(false);
+});
+
+nodes.desktopAccepting.addEventListener("change", () => {
+  void saveDesktop("/api/accepting", { accepting: nodes.desktopAccepting.checked });
+});
+
+nodes.desktopAutostart.addEventListener("change", () => {
+  void saveDesktop("/api/desktop", { autostart: nodes.desktopAutostart.checked });
+});
+
+nodes.desktopPanel.addEventListener("click", (event) => {
+  const choice = (event.target as HTMLElement).closest<HTMLElement>("[data-close-action]")?.dataset[
+    "closeAction"
+  ];
+  if (choice) void saveDesktop("/api/desktop", { closeAction: choice });
+});
 
 // Ticking elapsed time for running jobs, kept out of the render pass so it
 // never rewrites the job list.

@@ -209,12 +209,23 @@ a {
   background: var(--card);
 }
 
-/* One word, not a row — the gap that spaced the old mark split it in two. */
+/* The mark and the name are the two children; the name itself stays one span,
+   or the gap here would split it in two. */
 .wordmark {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
   font-family: var(--font-display);
   font-size: 1.0625rem;
   font-weight: 600;
   letter-spacing: -0.01em;
+}
+
+.wordmark .mark {
+  width: 1.375rem;
+  height: 1.375rem;
+  flex: none;
+  border-radius: 0.3rem;
 }
 
 .wordmark .dim {
@@ -275,6 +286,89 @@ a {
   font-family: var(--font-body);
   font-size: var(--text-2xs);
   font-weight: 500;
+}
+
+/* Two choices sharing the width, for the ones that are a sentence. */
+.segmented.wide {
+  width: 100%;
+}
+
+.segmented.wide button {
+  flex: 1;
+}
+
+/* --------------------------------------------------------------------------
+   Popover — the desktop menu, which is what the tray menu offers
+   -------------------------------------------------------------------------- */
+
+.menu {
+  position: relative;
+}
+
+.popover {
+  position: absolute;
+  inset-inline-end: 0;
+  top: calc(100% + var(--space-3xs));
+  z-index: 30;
+  width: 17rem;
+  max-width: calc(100vw - var(--space-md));
+  padding: var(--space-xs);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: 0 10px 24px oklch(0 0 0 / 12%);
+}
+
+.popover[hidden] {
+  display: none;
+}
+
+.popover-head {
+  margin-bottom: var(--space-2xs);
+  font-family: var(--font-display);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.popover-label {
+  margin: var(--space-2xs) 0 var(--space-3xs);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+
+.popover .muted {
+  margin-top: var(--space-3xs);
+}
+
+/* A checkbox row that reads as a setting rather than as a form field. */
+.switch {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  min-height: var(--control-sm);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.switch input {
+  width: auto;
+  min-height: 0;
+  margin: 0;
+  flex: none;
+  accent-color: var(--primary);
+}
+
+/* An icon-only button, sized square so it sits with the segmented controls. */
+button.ghost.square {
+  width: var(--control-sm);
+  min-width: var(--control-sm);
+  padding: 0;
+}
+
+button.ghost.square svg {
+  width: 0.9375rem;
+  height: 0.9375rem;
 }
 
 /* --------------------------------------------------------------------------

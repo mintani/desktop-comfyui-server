@@ -35,6 +35,24 @@ const STRINGS = {
   "theme.system": { en: "System", ja: "システム" },
   "lang.label": { en: "Language", ja: "言語" },
 
+  // The desktop menu, mirrored by the tray -----------------------------------
+  "desktop.title": { en: "Desktop app", ja: "デスクトップアプリ" },
+  "desktop.accepting": { en: "Accept new work", ja: "新規の受付" },
+  "desktop.acceptingNote": {
+    en: "Turning this off stops new jobs. Anything already running finishes.",
+    ja: "外すと新規の受付だけ止まります。実行中のものは最後まで動きます。",
+  },
+  "desktop.autostart": { en: "Start when the computer starts", ja: "PC 起動時に起動する" },
+  "desktop.closeAction": { en: "Closing the window", ja: "ウィンドウを閉じたとき" },
+  "desktop.toTray": { en: "Keeps running", ja: "常駐する" },
+  "desktop.quit": { en: "Quits", ja: "終了する" },
+  "desktop.note": {
+    en: "These apply to the desktop app. In a browser tab they do nothing.",
+    ja: "デスクトップアプリでのみ効きます。ブラウザのタブでは何も起きません。",
+  },
+  "desktop.saved": { en: "saved", ja: "保存しました" },
+  "desktop.saveFailed": { en: "save failed", ja: "保存できませんでした" },
+
   "nav.label": { en: "Sections", ja: "セクション" },
   "nav.settings": { en: "Settings", ja: "設定" },
   "nav.generate": { en: "Generate", ja: "生成" },
@@ -47,6 +65,9 @@ const STRINGS = {
   "vitals.standalone": { en: "standalone", ja: "単独" },
   "vitals.process": { en: "process", ja: "プロセス" },
   "vitals.access": { en: "access", ja: "アクセス" },
+  "vitals.work": { en: "work", ja: "受付" },
+  "vitals.accepting": { en: "accepting", ja: "受付中" },
+  "vitals.paused": { en: "paused", ja: "停止中" },
   "vitals.tokenNeeded": {
     en: "open this page as ?token=<UI_TOKEN>",
     ja: "?token=<UI_TOKEN> を付けて開いてください",
@@ -74,6 +95,7 @@ const STRINGS = {
   "run.default": { en: "default", ja: "既定値" },
   "run.image": { en: "Input image", ja: "入力画像" },
   "run.submit": { en: "Run", ja: "実行" },
+  "run.paused": { en: "new work is paused", ja: "新規の受付を停止中です" },
   "run.queueing": { en: "queueing…", ja: "送信中…" },
   "run.queued": { en: "queued — it appears in Runs", ja: "送信しました。実行履歴に出ます" },
   "run.interruptSent": { en: "interrupt sent", ja: "中断を送信しました" },

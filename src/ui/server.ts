@@ -48,6 +48,8 @@ async function handleState(): Promise<Response> {
     agent: agentSnapshot(),
     upstreams: publicUpstreams(settings),
     settings: { comfyDir: settings.comfyDir, comfyCommand: settings.comfyCommand },
+    accepting: settings.accepting,
+    desktop: settings.desktop,
     jobs: listJobs(),
   });
 }
@@ -171,6 +173,51 @@ async function handleSettingsSave(req: Request): Promise<Response> {
   }
 }
 
+/**
+ * The pause switch, reachable from the page and from the tray menu. Nothing is
+ * stopped by it — it decides what is allowed to start.
+ */
+async function handleAccepting(req: Request): Promise<Response> {
+  try {
+    const { accepting } = (await req.json()) as { accepting?: unknown };
+    if (typeof accepting !== "boolean") return fail("accepting must be true or false");
+    const saved = await saveSettings({ accepting });
+    return Response.json({ accepting: saved.accepting });
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/** How the desktop shell behaves. The shell reads these back and applies them. */
+async function handleDesktopSave(req: Request): Promise<Response> {
+  try {
+    const body = (await req.json()) as { autostart?: unknown; closeAction?: unknown };
+    const current = (await loadSettings()).desktop;
+
+    const closeAction =
+      body.closeAction === undefined
+        ? current.closeAction
+        : body.closeAction === "tray" || body.closeAction === "quit"
+          ? body.closeAction
+          : null;
+    if (closeAction === null) return fail('closeAction must be "tray" or "quit"');
+
+    if (body.autostart !== undefined && typeof body.autostart !== "boolean") {
+      return fail("autostart must be true or false");
+    }
+
+    const saved = await saveSettings({
+      desktop: {
+        autostart: body.autostart === undefined ? current.autostart : body.autostart,
+        closeAction,
+      },
+    });
+    return Response.json({ desktop: saved.desktop });
+  } catch (err) {
+    return fail(err);
+  }
+}
+
 async function handleComfyStart(): Promise<Response> {
   try {
     await startComfy();
@@ -228,6 +275,8 @@ function handleJobsClear(): Response {
  */
 async function handleRun(req: Request): Promise<Response> {
   try {
+    if (!(await loadSettings()).accepting) return fail("new work is paused", 409);
+
     const form = await req.formData();
 
     const text = (key: string): string | undefined => {
@@ -342,6 +391,8 @@ export function startUi() {
       "/api/upstreams": { POST: guarded(handleUpstreamsSave) },
 
       "/api/settings": { POST: guarded(handleSettingsSave) },
+      "/api/accepting": { POST: guarded(handleAccepting) },
+      "/api/desktop": { POST: guarded(handleDesktopSave) },
       "/api/comfy/start": { POST: guarded(handleComfyStart) },
       "/api/comfy/stop": { POST: guarded(handleComfyStop) },
 

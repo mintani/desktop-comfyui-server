@@ -177,6 +177,13 @@ async function runPoll() {
       }
     }
 
+    // Paused means "claim nothing". Heartbeats carry on, so the upstream still
+    // sees this host as alive — its queue simply is not drained from here.
+    if (!(await loadSettings()).accepting) {
+      await idle(POLL_INTERVAL_MS);
+      continue;
+    }
+
     const claimed = await claimNext();
     if (claimed) {
       await processJob(claimed.server, claimed.job);
