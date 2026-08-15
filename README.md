@@ -4,7 +4,7 @@ Download Setup from releases
 セットアップファイルをreleasesからダウンロードして使用してください。
 このアプリは開発中のためご使用は自己責任でお願いします。
 
-#Screenshot
+# Screenshot
 <img width="1007" height="791" alt="image" src="https://github.com/user-attachments/assets/e23c64e4-981c-4d70-9e1d-3b5479b12ca5" />
 <img width="1006" height="792" alt="image" src="https://github.com/user-attachments/assets/e6cacfad-ed85-4287-b417-c8192ba59cb0" />
 upstream server setting
