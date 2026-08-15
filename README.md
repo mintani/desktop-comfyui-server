@@ -1,5 +1,16 @@
 # desktop-comfyui-server
 
+Download Setup from releases
+セットアップファイルをreleasesからダウンロードして使用してください。
+このアプリは開発中のためご使用は自己責任でお願いします。
+
+#Screenshot
+<img width="1007" height="791" alt="image" src="https://github.com/user-attachments/assets/e23c64e4-981c-4d70-9e1d-3b5479b12ca5" />
+<img width="1006" height="792" alt="image" src="https://github.com/user-attachments/assets/e6cacfad-ed85-4287-b417-c8192ba59cb0" />
+upstream server setting
+<img width="774" height="374" alt="image" src="https://github.com/user-attachments/assets/cac74acb-4b12-4d5c-82c5-c5881a9bf2a8" />
+
+
 Run your own ComfyUI workflows from a browser, and optionally let a remote job
 server hand work to the machine holding the GPU.
 
