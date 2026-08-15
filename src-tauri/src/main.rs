@@ -8,7 +8,7 @@
 //! window onto it. Everything the window shows is the management UI already in
 //! `src/ui`, so the two ways of running this tool cannot drift apart.
 //!
-//! Three things are handed to the server that the command line would otherwise
+//! Four things are handed to the server that the command line would otherwise
 //! have to provide:
 //!
 //! - `DATA_DIR` — a real directory to write to. The bundled server is a single
@@ -17,19 +17,80 @@
 //!   user is already running.
 //! - `UI_TOKEN` — a fresh secret each launch, so nothing else on the machine
 //!   can drive a server that can start processes.
+//! - the window, which is the only thing holding that token.
+//!
+//! The tray menu and the page's own menu are two faces of the same switches:
+//! both write to the server, and this side reads them back on a timer rather
+//! than keeping its own copy. That is why closing the window can change what
+//! the tray shows without either one telling the other.
 
 use std::collections::HashMap;
 use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
+use tauri::menu::{CheckMenuItem, MenuBuilder, MenuItem};
+use tauri::tray::TrayIconBuilder;
+use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent, Wry};
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 use uuid::Uuid;
 
-/// The server process this window is a window onto.
-struct Server(Mutex<Option<CommandChild>>);
+const WINDOW: &str = "main";
+
+/// The folder this app owns under the platform's data directory. Deliberately
+/// the project name rather than the bundle identifier, which is what
+/// `app_data_dir()` would have given.
+const DATA_FOLDER: &str = "desktop-comfyui-server";
+
+/// How the server is reached. Cloned into the tray handlers, which outlive any
+/// borrow of the app.
+#[derive(Clone)]
+struct Api {
+    client: reqwest::Client,
+    base: String,
+    token: String,
+}
+
+impl Api {
+    async fn state(&self) -> Option<serde_json::Value> {
+        self.client
+            .get(format!("{}/api/state", self.base))
+            .bearer_auth(&self.token)
+            .send()
+            .await
+            .ok()?
+            .json()
+            .await
+            .ok()
+    }
+
+    /// Fire and forget. Whatever it changed comes back on the next poll, so
+    /// there is nothing here to keep in step by hand.
+    async fn post(&self, path: &str, body: serde_json::Value) {
+        let sent = self
+            .client
+            .post(format!("{}{}", self.base, path))
+            .bearer_auth(&self.token)
+            .json(&body)
+            .send()
+            .await;
+        if let Err(err) = sent {
+            eprintln!("[app] {path} failed: {err}");
+        }
+    }
+}
+
+/// The parts of the shell that outlive a single handler.
+struct Shell {
+    server: Mutex<Option<CommandChild>>,
+    /// Mirrors the stored setting, read when the window is closed.
+    close_action: Mutex<String>,
+    /// Set by the tray's Quit, so the close handler stops intercepting.
+    quitting: AtomicBool,
+}
 
 /// A port the OS has just told us is free. Something else could take it in the
 /// moment between here and the server binding it; that shows up as a server
@@ -42,11 +103,7 @@ fn free_port() -> std::io::Result<u16> {
 /// Fresh every launch. It never has to outlive the window, so it is never
 /// stored anywhere.
 fn new_token() -> String {
-    format!(
-        "{}{}",
-        Uuid::new_v4().simple(),
-        Uuid::new_v4().simple()
-    )
+    format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
 }
 
 /// Block until the server is listening. It starts in well under a second, so
@@ -63,14 +120,64 @@ fn wait_until_listening(port: u16, timeout: Duration) -> bool {
     false
 }
 
+fn show_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(WINDOW) {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+/// Take what the server says and make the shell match it. Called on a timer,
+/// so a switch flipped in the page shows up in the tray a moment later.
+fn apply_state(app: &AppHandle, accepting: &CheckMenuItem<Wry>, state: &serde_json::Value) {
+    if let Some(value) = state.get("accepting").and_then(serde_json::Value::as_bool) {
+        let _ = accepting.set_checked(value);
+    }
+
+    let desktop = state.get("desktop");
+
+    if let Some(action) = desktop
+        .and_then(|d| d.get("closeAction"))
+        .and_then(serde_json::Value::as_str)
+    {
+        if let Ok(mut stored) = app.state::<Shell>().close_action.lock() {
+            *stored = action.to_string();
+        }
+    }
+
+    // Only touched when it disagrees, so the registry entry is not rewritten
+    // every couple of seconds.
+    if let Some(wanted) = desktop
+        .and_then(|d| d.get("autostart"))
+        .and_then(serde_json::Value::as_bool)
+    {
+        let manager = app.autolaunch();
+        if manager.is_enabled().unwrap_or(false) != wanted {
+            let changed = if wanted {
+                manager.enable()
+            } else {
+                manager.disable()
+            };
+            if let Err(err) = changed {
+                eprintln!("[app] could not set start-at-login: {err}");
+            }
+        }
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            None,
+        ))
         .setup(|app| {
             let port = free_port()?;
             let token = new_token();
 
-            let data_dir = app.path().app_data_dir()?;
+            let data_dir = app.path().data_dir()?.join(DATA_FOLDER);
             std::fs::create_dir_all(&data_dir)?;
 
             let (mut rx, child) = app
@@ -89,7 +196,11 @@ fn main() {
                 ]))
                 .spawn()?;
 
-            app.manage(Server(Mutex::new(Some(child))));
+            app.manage(Shell {
+                server: Mutex::new(Some(child)),
+                close_action: Mutex::new("tray".to_string()),
+                quitting: AtomicBool::new(false),
+            });
 
             // The server's own output, so a bad workflow directory or a port
             // clash explains itself instead of showing up as a blank window.
@@ -111,15 +222,112 @@ fn main() {
                 return Err("the server did not start listening".into());
             }
 
+            let api = Api {
+                client: reqwest::Client::new(),
+                base: format!("http://127.0.0.1:{port}"),
+                token: token.clone(),
+            };
+
+            // The tray. Its labels are English only: the page's language lives
+            // in the browser, which this side cannot read.
+            let open = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
+            let accepting =
+                CheckMenuItem::with_id(app, "accepting", "Accept new work", true, true, None::<&str>)?;
+            let stop_comfy = MenuItem::with_id(app, "stop-comfy", "Stop ComfyUI", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+
+            let menu = MenuBuilder::new(app)
+                .items(&[&open, &accepting])
+                .separator()
+                .items(&[&stop_comfy])
+                .separator()
+                .items(&[&quit])
+                .build()?;
+
+            let menu_api = api.clone();
+            let menu_accepting = accepting.clone();
+
+            TrayIconBuilder::with_id("main")
+                .icon(
+                    app.default_window_icon()
+                        .cloned()
+                        .ok_or("the app has no icon to put in the tray")?,
+                )
+                .tooltip("Desktop ComfyUI Server")
+                .menu(&menu)
+                .show_menu_on_left_click(true)
+                .on_menu_event(move |app, event| match event.id.as_ref() {
+                    "open" => show_window(app),
+                    "accepting" => {
+                        // The item has already toggled itself; the server is
+                        // told what it now shows.
+                        let wanted = menu_accepting.is_checked().unwrap_or(true);
+                        let api = menu_api.clone();
+                        tauri::async_runtime::spawn(async move {
+                            api.post("/api/accepting", serde_json::json!({ "accepting": wanted }))
+                                .await;
+                        });
+                    }
+                    "stop-comfy" => {
+                        let api = menu_api.clone();
+                        tauri::async_runtime::spawn(async move {
+                            api.post("/api/comfy/stop", serde_json::json!({})).await;
+                        });
+                    }
+                    "quit" => {
+                        app.state::<Shell>().quitting.store(true, Ordering::SeqCst);
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .build(app)?;
+
             // The token rides in on the address once. The page stores it and
             // clears it from the bar, so it is not left sitting in history.
             let url = format!("http://127.0.0.1:{port}/?token={token}");
 
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse()?))
+            let window = WebviewWindowBuilder::new(app, WINDOW, WebviewUrl::External(url.parse()?))
                 .title("Desktop ComfyUI Server")
                 .inner_size(1000.0, 760.0)
                 .min_inner_size(480.0, 420.0)
                 .build()?;
+
+            let close_handle = app.handle().clone();
+            window.on_window_event(move |event| {
+                let WindowEvent::CloseRequested { api, .. } = event else {
+                    return;
+                };
+
+                let shell = close_handle.state::<Shell>();
+                if shell.quitting.load(Ordering::SeqCst) {
+                    return;
+                }
+                let to_tray = shell
+                    .close_action
+                    .lock()
+                    .map(|action| *action == "tray")
+                    .unwrap_or(true);
+
+                if to_tray {
+                    api.prevent_close();
+                    if let Some(window) = close_handle.get_webview_window(WINDOW) {
+                        let _ = window.hide();
+                    }
+                }
+            });
+
+            // One poll keeps the tray, the close behaviour and start-at-login
+            // in step with whatever the page last saved.
+            let sync_handle = app.handle().clone();
+            let sync_api = api;
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    if let Some(state) = sync_api.state().await {
+                        apply_state(&sync_handle, &accepting, &state);
+                    }
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+            });
 
             Ok(())
         })
@@ -127,12 +335,12 @@ fn main() {
         .expect("could not start the desktop app")
         .run(|app, event| {
             if let RunEvent::Exit = event {
-                if let Some(state) = app.try_state::<Server>() {
-                    if let Some(child) = state.0.lock().unwrap().take() {
-                        // This is a hard kill, so the server does not get to run
-                        // its own shutdown. A ComfyUI started from the Process
-                        // panel therefore outlives the window — stop it there
-                        // before quitting. Sending SIGTERM by pid would fix it.
+                if let Some(shell) = app.try_state::<Shell>() {
+                    if let Some(child) = shell.server.lock().ok().and_then(|mut c| c.take()) {
+                        // A hard kill, so the server does not get to run its own
+                        // shutdown. A ComfyUI started from the Process panel
+                        // therefore outlives the app — stop it from the tray or
+                        // the page first. Sending SIGTERM by pid would fix it.
                         let _ = child.kill();
                     }
                 }
