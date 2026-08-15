@@ -8,7 +8,9 @@ pre-commit:
       run: bun oxlint --fix {staged_files}
       glob: "*.{ts,tsx,js,jsx}"
       stage_fixed: true
+    # No json here: .oxfmtrc.json ignores it, and handing oxfmt a list it has
+    # nothing to do with is an error rather than a no-op.
     - name: oxfmt
       run: bun oxfmt --write {staged_files}
-      glob: "*.{ts,tsx,js,jsx,json}"
+      glob: "*.{ts,tsx,js,jsx}"
       stage_fixed: true
