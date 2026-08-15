@@ -1,0 +1,47 @@
+# dependencies (bun install)
+node_modules
+
+# output
+out
+dist
+*.tgz
+
+# code coverage
+coverage
+*.lcov
+
+# logs
+logs
+*.log
+
+# dotenv environment variable files
+.env
+.env.*.local
+
+# runtime state (active workflow selection, etc.)
+.state.json
+.jobs.json
+
+# caches
+.cache
+*.tsbuildinfo
+
+# editors
+.idea
+.claude
+
+# agent tooling, local to whoever is working on this
+.agents
+skills-lock.json
+
+# macOS
+.DS_Store
+
+# User-supplied workflows and their slot overrides are local to each install.
+# Keep the directory and its README, ignore everything dropped into it.
+workflows/*
+!workflows/README.md
+!workflows/.gitkeep
+
+# Input images handed to ComfyUI
+input

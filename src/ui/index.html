@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Desktop ComfyUI Server</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2300807f'/%3E%3Cg stroke='%23e8f9fa' stroke-width='2'%3E%3Cpath d='M10 10 L22 16 M10 22 L22 16'/%3E%3C/g%3E%3Cg fill='%23e8f9fa'%3E%3Ccircle cx='10' cy='10' r='3.5'/%3E%3Ccircle cx='10' cy='22' r='3.5'/%3E%3Ccircle cx='22' cy='16' r='3.5'/%3E%3C/g%3E%3C/svg%3E"
+    />
+
+    <!--
+      Applied before the first paint so the page never flashes the wrong theme.
+      Light is the default; the header switches it and the choice is remembered.
+      The language goes on `<html lang>` here too, early enough for a screen
+      reader; the module below is what checks it and translates the words.
+    -->
+    <script>
+      (function () {
+        var mode = "light";
+        var lang = "";
+        try {
+          var stored = localStorage.getItem("theme");
+          if (stored === "light" || stored === "dark" || stored === "system") mode = stored;
+          lang = localStorage.getItem("lang") || "";
+        } catch (err) {
+          /* private mode — fall back to the defaults */
+        }
+        var dark =
+          mode === "dark" ||
+          (mode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.classList.toggle("dark", dark);
+        document.documentElement.dataset.theme = mode;
+        if (lang) document.documentElement.lang = lang;
+      })();
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="wordmark"><span class="dim">desktop-comfyui-</span>server</div>
+
+      <div class="topbar-side">
+        <p class="mono muted" id="comfy-url">&nbsp;</p>
+
+        <button type="button" class="ghost" id="comfy-power">Start ComfyUI</button>
+
+        <!-- Filled in from the language list, so adding one is a single edit. -->
+        <div
+          class="segmented text"
+          id="lang-toggle"
+          role="group"
+          data-i18n-label="lang.label"
+        ></div>
+
+        <div class="segmented" id="theme-toggle" role="group" data-i18n-label="theme.label">
+          <button
+            type="button"
+            data-theme-choice="light"
+            data-i18n-title="theme.light"
+            aria-pressed="false"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="4" />
+              <path
+                d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"
+              />
+            </svg>
+            <span class="sr-only" data-i18n="theme.light">Light</span>
+          </button>
+          <button
+            type="button"
+            data-theme-choice="dark"
+            data-i18n-title="theme.dark"
+            aria-pressed="false"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+            </svg>
+            <span class="sr-only" data-i18n="theme.dark">Dark</span>
+          </button>
+          <button
+            type="button"
+            data-theme-choice="system"
+            data-i18n-title="theme.system"
+            aria-pressed="false"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <rect width="20" height="14" x="2" y="3" rx="2" />
+              <path d="M8 21h8M12 17v4" />
+            </svg>
+            <span class="sr-only" data-i18n="theme.system">System</span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <div class="statusbar" id="vitals"></div>
+
+    <div class="shell">
+      <!-- Navigation only. Actions and settings live on the pages themselves. -->
+      <nav class="sidebar" data-i18n-label="nav.label">
+        <a class="nav-item" href="#/settings" data-page-link="settings" data-i18n="nav.settings"
+          >Settings</a
+        >
+        <a class="nav-item" href="#/generate" data-page-link="generate" data-i18n="nav.generate"
+          >Generate</a
+        >
+      </nav>
+
+      <main class="content">
+        <section class="page workbench" data-page="generate" hidden>
+          <div class="column">
+            <section class="panel">
+              <div class="panel-head">
+                <h2 data-i18n="run.title">Run</h2>
+                <button type="button" class="ghost" id="interrupt" data-i18n="run.interrupt">
+                  Interrupt
+                </button>
+              </div>
+
+              <form id="run-form">
+                <label class="field">
+                  <span data-i18n="run.workflow">Workflow</span>
+                  <select id="run-workflow" name="workflow"></select>
+                </label>
+
+                <label class="field" data-slot="positive">
+                  <span data-i18n="run.positive">Positive prompt</span>
+                  <textarea
+                    name="positive"
+                    rows="3"
+                    data-i18n-placeholder="run.promptPlaceholder"
+                  ></textarea>
+                </label>
+
+                <label class="field" data-slot="negative">
+                  <span data-i18n="run.negative">Negative prompt</span>
+                  <textarea
+                    name="negative"
+                    rows="2"
+                    data-i18n-placeholder="run.promptPlaceholder"
+                  ></textarea>
+                </label>
+
+                <div class="row">
+                  <label class="field" data-slot="seed">
+                    <span data-i18n="run.seed">Seed</span>
+                    <input type="number" name="seed" data-i18n-placeholder="run.random" />
+                  </label>
+                  <label class="field" data-slot="length">
+                    <span data-i18n="run.seconds">Seconds</span>
+                    <input
+                      type="number"
+                      name="seconds"
+                      step="0.1"
+                      data-i18n-placeholder="run.default"
+                    />
+                  </label>
+                  <label class="field" data-slot="frameRate">
+                    <span data-i18n="run.fps">FPS</span>
+                    <input type="number" name="fps" data-i18n-placeholder="run.default" />
+                  </label>
+                </div>
+
+                <label class="field" data-slot="image">
+                  <span data-i18n="run.image">Input image</span>
+                  <input type="file" name="image" accept="image/*" />
+                </label>
+
+                <!-- Pinned to the foot of the panel. It is pressed over and over,
+                     so it must not move when the form above it changes. -->
+                <div class="actions">
+                  <button type="submit" id="run-submit" data-i18n="run.submit">Run</button>
+                  <p class="muted" id="run-note"></p>
+                </div>
+              </form>
+            </section>
+          </div>
+
+          <div class="column">
+            <section class="panel">
+              <div class="panel-head">
+                <h2 data-i18n="jobs.title">Runs</h2>
+                <button type="button" class="ghost" id="jobs-clear" data-i18n="jobs.clear">
+                  Clear finished
+                </button>
+              </div>
+              <div id="jobs"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="page" data-page="settings">
+          <section class="panel">
+            <div class="panel-head">
+              <h2 data-i18n="upload.title">Upload</h2>
+              <button type="button" class="ghost" id="reload" data-i18n="upload.reload">
+                Reload from disk
+              </button>
+            </div>
+            <form id="upload-form">
+              <label class="field">
+                <span data-i18n="upload.file">API-format workflow (.json)</span>
+                <input
+                  type="file"
+                  id="upload-file"
+                  name="workflow"
+                  accept=".json,application/json"
+                />
+              </label>
+              <label class="field">
+                <span data-i18n="upload.name">Save as (optional)</span>
+                <input
+                  type="text"
+                  id="upload-name"
+                  data-i18n-placeholder="upload.namePlaceholder"
+                />
+              </label>
+              <div class="actions">
+                <button type="submit" id="upload-submit" data-i18n="upload.submit">Upload</button>
+                <p class="muted" id="upload-note"></p>
+              </div>
+            </form>
+            <p class="muted" id="workflow-dir"></p>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head"><h2 data-i18n="workflows.title">Installed</h2></div>
+            <div id="workflows"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head"><h2 data-i18n="comfy.title">ComfyUI</h2></div>
+            <form id="settings-form">
+              <label class="field">
+                <span data-i18n="comfy.dir">Directory</span>
+                <input type="text" id="comfy-dir" placeholder="/home/you/ComfyUI" />
+              </label>
+              <label class="field">
+                <span data-i18n="comfy.command">Start command (optional)</span>
+                <input
+                  type="text"
+                  id="comfy-command"
+                  data-i18n-placeholder="comfy.commandPlaceholder"
+                />
+              </label>
+              <div class="actions">
+                <button type="submit" id="settings-submit" data-i18n="comfy.save">Save</button>
+                <p class="muted" id="settings-note"></p>
+              </div>
+            </form>
+            <p class="muted" data-i18n-html="comfy.warning"></p>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2 data-i18n="process.title">Process</h2>
+              <button type="button" class="ghost" id="comfy-power-2">Start</button>
+            </div>
+            <div id="comfy-process"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2 data-i18n="servers.title">Upstream servers</h2>
+              <button type="button" class="ghost" id="server-add" data-i18n="servers.add">
+                Add server
+              </button>
+            </div>
+            <p class="muted" data-i18n="servers.help"></p>
+            <div id="servers"></div>
+            <div class="actions">
+              <button type="button" id="servers-save" data-i18n="servers.save">Save servers</button>
+              <button type="button" class="ghost" id="servers-revert" data-i18n="servers.revert">
+                Revert
+              </button>
+              <p class="muted" id="servers-note"></p>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./app.ts"></script>
+  </body>
+</html>

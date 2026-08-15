@@ -1,0 +1,6 @@
+# Built by `bun run build:sidecar` — a ~100 MB executable per platform.
+/binaries/
+
+# Cargo and Tauri output.
+/target/
+/gen/

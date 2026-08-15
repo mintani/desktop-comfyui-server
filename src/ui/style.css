@@ -1,0 +1,806 @@
+/* Aurora / Aqua — the design system nai-desktop-app uses.
+ *
+ * Values are lifted from that project's `packages/ui/src/styles/globals.css`
+ * and its `design.md`, so the two tools look like they came from the same hand:
+ * pale aqua paper, one cyan accent, rounded surfaces, pill buttons. Light is
+ * the default; the header switches it.
+ *
+ * Poppins carries display and UI. JetBrains Mono carries the values the machine
+ * wrote — counts, ids, durations, file names.
+ */
+
+/* --------------------------------------------------------------------------
+   Tokens — light (the portfolio's aqua)
+   -------------------------------------------------------------------------- */
+
+:root {
+  --radius: 0.75rem;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-pill: 999px;
+
+  --background: oklch(97% 0.018 201);
+  --foreground: oklch(30.5% 0 0);
+  --card: oklch(99.2% 0.006 200);
+  --card-foreground: oklch(30.5% 0 0);
+
+  --primary: oklch(50% 0.13 197);
+  --primary-foreground: oklch(100% 0 0);
+
+  --secondary: oklch(92.8% 0.034 194);
+  --secondary-foreground: oklch(30.5% 0 0);
+  --muted: oklch(94.5% 0.02 197);
+  --muted-foreground: oklch(46% 0 0);
+  --accent: oklch(92.8% 0.034 194);
+  --destructive: oklch(52% 0.2 27.3);
+  --ok: oklch(48% 0.13 164);
+  --warn: oklch(52% 0.12 328);
+
+  --border: oklch(30.5% 0 0 / 12%);
+  --input: oklch(30.5% 0 0 / 18%);
+  --ring: oklch(50% 0.13 197);
+
+  /* The surface generated pictures sit on. Held at zero chroma so nothing
+     around them shifts how their colour reads. */
+  --canvas: oklch(88% 0 0);
+
+  /* The two hues the slot tags use, and nothing else. */
+  --tag-detected: oklch(85.6% 0.137 164);
+  --tag-override: oklch(81.6% 0.119 328);
+
+  --font-display: "Poppins", ui-sans-serif, system-ui, sans-serif;
+  --font-body:
+    "Poppins", "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, "Yu Gothic", YuGothic,
+    system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --space-3xs: 0.25rem;
+  --space-2xs: 0.5rem;
+  --space-xs: 0.75rem;
+  --space-sm: 1rem;
+  --space-md: 1.5rem;
+  --space-lg: 2rem;
+
+  --text-2xs: 0.75rem;
+  --text-xs: 0.8125rem;
+  --text-sm: 0.875rem;
+  --text-base: 0.9375rem;
+  --text-md: 1.0625rem;
+
+  /* Click targets. Comfortable in a window a few hundred pixels wide. */
+  --control: 2.25rem;
+  --control-sm: 1.875rem;
+
+  /* Generated content, so it cannot come from the DOM. The value here is what
+     shows until the i18n module replaces it with the chosen language. */
+  --label-unused: " · unused";
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-short: 150ms;
+  --dur-mid: 220ms;
+}
+
+/* --------------------------------------------------------------------------
+   Tokens — dark (Aurora)
+   -------------------------------------------------------------------------- */
+
+.dark {
+  --background: oklch(17% 0.012 210);
+  --foreground: oklch(96% 0.006 200);
+  --card: oklch(22% 0.014 210);
+  --card-foreground: oklch(96% 0.006 200);
+
+  --primary: oklch(80% 0.13 197);
+  --primary-foreground: oklch(20% 0.02 200);
+
+  --secondary: oklch(27% 0.016 210);
+  --secondary-foreground: oklch(96% 0.006 200);
+  --muted: oklch(27% 0.016 210);
+  --muted-foreground: oklch(72% 0.012 200);
+  --accent: oklch(30% 0.02 210);
+  --destructive: oklch(70.4% 0.191 22.2);
+  --ok: oklch(85.6% 0.137 164);
+  --warn: oklch(81.6% 0.119 328);
+
+  --border: oklch(100% 0 0 / 12%);
+  --input: oklch(100% 0 0 / 16%);
+  --ring: oklch(80% 0.13 197);
+
+  --canvas: oklch(12% 0 0);
+}
+
+/* --------------------------------------------------------------------------
+   Base
+   -------------------------------------------------------------------------- */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  overflow-x: clip;
+}
+
+body {
+  margin: 0;
+  height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-style: normal;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+h1 {
+  font-size: 1.0625rem;
+}
+
+h2 {
+  font-size: var(--text-base);
+}
+
+p {
+  margin: 0;
+}
+
+code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+a {
+  color: var(--primary);
+  text-underline-offset: 2px;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.muted {
+  color: var(--muted-foreground);
+  font-size: var(--text-xs);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------------------
+   Header
+   -------------------------------------------------------------------------- */
+
+.topbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-xs);
+  flex-wrap: wrap;
+  min-height: 3rem;
+  padding: var(--space-2xs) var(--space-xs);
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+}
+
+/* One word, not a row — the gap that spaced the old mark split it in two. */
+.wordmark {
+  font-family: var(--font-display);
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.wordmark .dim {
+  color: var(--muted-foreground);
+}
+
+.topbar-side {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  flex-wrap: wrap;
+}
+
+/* A segmented control — the shape nai-desktop-app uses for its view switch. */
+.segmented {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+  padding: 0.125rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--muted);
+}
+
+.segmented button {
+  width: var(--control-sm);
+  min-height: var(--control-sm);
+  height: var(--control-sm);
+  padding: 0;
+  border: 0;
+  border-radius: calc(var(--radius-md) - 2px);
+  background: transparent;
+  color: var(--muted-foreground);
+  transition: background-color var(--dur-short) var(--ease-out);
+}
+
+.segmented button:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--card) 60%, transparent);
+  color: var(--foreground);
+  transform: none;
+}
+
+.segmented button[aria-pressed="true"] {
+  background: var(--card);
+  box-shadow: 0 1px 2px oklch(0 0 0 / 10%);
+  color: var(--primary);
+}
+
+.segmented svg {
+  width: 0.875rem;
+  height: 0.875rem;
+}
+
+/* The same control carrying words instead of icons, so it sizes to the word. */
+.segmented.text button {
+  width: auto;
+  padding: 0 var(--space-2xs);
+  font-family: var(--font-body);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+}
+
+/* --------------------------------------------------------------------------
+   Status chips
+   -------------------------------------------------------------------------- */
+
+.statusbar {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2xs);
+  padding: var(--space-2xs) var(--space-xs);
+  border-bottom: 1px solid var(--border);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3xs);
+  padding: 0.25rem var(--space-xs);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--card);
+  font-size: var(--text-2xs);
+  white-space: nowrap;
+}
+
+.chip .key {
+  color: var(--muted-foreground);
+}
+
+.dot {
+  width: 0.4375rem;
+  height: 0.4375rem;
+  flex: none;
+  border-radius: 50%;
+  background: var(--muted-foreground);
+}
+
+.dot.ok {
+  background: var(--ok);
+}
+.dot.run {
+  background: var(--primary);
+}
+.dot.warn {
+  background: var(--warn);
+}
+.dot.bad {
+  background: var(--destructive);
+}
+
+/* --------------------------------------------------------------------------
+   Shell — a fixed sidebar that only chooses the page, and the page itself
+   -------------------------------------------------------------------------- */
+
+.shell {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Narrow windows put the sidebar above the content, so the whole shell scrolls
+   as one; from the sidebar breakpoint up, only the page does. */
+@media (max-width: 47.999rem) {
+  .shell {
+    overflow-y: auto;
+  }
+}
+
+@media (min-width: 48rem) {
+  .shell {
+    grid-template-columns: 12rem minmax(0, 1fr);
+  }
+}
+
+.sidebar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3xs);
+  align-content: start;
+  padding: var(--space-2xs);
+  border-bottom: 1px solid var(--border);
+}
+
+@media (min-width: 48rem) {
+  .sidebar {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    padding: var(--space-xs) var(--space-2xs);
+    overflow-y: auto;
+    border-bottom: 0;
+    border-inline-end: 1px solid var(--border);
+  }
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  min-height: var(--control);
+  padding: 0 var(--space-xs);
+  border-radius: var(--radius-md);
+  color: var(--muted-foreground);
+  font-family: var(--font-display);
+  font-size: var(--text-base);
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color var(--dur-short) var(--ease-out);
+}
+
+.nav-item:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.nav-item.on {
+  background: var(--secondary);
+  color: var(--foreground);
+}
+
+.nav-item:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+.content {
+  min-width: 0;
+  padding: var(--space-xs);
+}
+
+@media (min-width: 48rem) {
+  .content {
+    overflow-y: auto;
+  }
+}
+
+.page {
+  display: grid;
+  gap: var(--space-xs);
+  align-content: start;
+  max-width: 60rem;
+}
+
+.page[hidden] {
+  display: none;
+}
+
+/* --------------------------------------------------------------------------
+   Workbench — controls on one side, what the machine is doing on the other
+   -------------------------------------------------------------------------- */
+
+.page.workbench {
+  max-width: 76rem;
+}
+
+@media (min-width: 62rem) {
+  .page.workbench {
+    grid-template-columns: minmax(0, 21rem) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.column {
+  display: grid;
+  gap: var(--space-xs);
+  align-content: start;
+  min-width: 0;
+}
+
+.panel {
+  min-width: 0;
+  padding: var(--space-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--card-foreground);
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2xs);
+  margin-bottom: var(--space-2xs);
+}
+
+/* --------------------------------------------------------------------------
+   Form
+   -------------------------------------------------------------------------- */
+
+.field {
+  display: block;
+  margin-bottom: var(--space-2xs);
+}
+
+.field > span {
+  display: block;
+  margin-bottom: 0.1875rem;
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+
+.field.disabled {
+  opacity: 0.5;
+}
+
+.field.disabled > span::after {
+  content: var(--label-unused);
+  font-weight: 400;
+}
+
+input,
+textarea,
+select {
+  width: 100%;
+  min-height: var(--control);
+  padding: 0.375rem var(--space-2xs);
+  border: 1px solid var(--input);
+  border-radius: var(--radius-sm);
+  background: var(--background);
+  color: var(--foreground);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  resize: vertical;
+  /* Held in reserve so gaining focus never moves the control. */
+  outline: 2px solid transparent;
+  outline-offset: 1px;
+  transition: border-color var(--dur-short) var(--ease-out);
+}
+
+textarea {
+  min-height: auto;
+  padding: var(--space-2xs);
+  line-height: 1.5;
+}
+
+input:hover:not(:disabled),
+textarea:hover:not(:disabled),
+select:hover:not(:disabled) {
+  border-color: color-mix(in oklab, var(--primary) 45%, var(--input));
+}
+
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  border-color: var(--ring);
+  outline-color: var(--ring);
+}
+
+input:disabled,
+textarea:disabled,
+select:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+input[type="file"] {
+  padding: 0.1875rem;
+}
+
+input[type="file"]::file-selector-button {
+  margin-inline-end: var(--space-2xs);
+  padding: 0.1875rem var(--space-2xs);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  font: inherit;
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(6rem, 1fr));
+  gap: var(--space-2xs);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  flex-wrap: wrap;
+  margin-top: var(--space-2xs);
+}
+
+/* --------------------------------------------------------------------------
+   Buttons — pill, per the system's CTA voice
+   -------------------------------------------------------------------------- */
+
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3xs);
+  min-height: var(--control);
+  padding: 0 var(--space-md);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-family: var(--font-display);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  transition:
+    background-color var(--dur-short) var(--ease-out),
+    transform var(--dur-short) var(--ease-out);
+}
+
+button:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--primary) 86%, var(--foreground));
+  /* A lift, never a scale. */
+  transform: translateY(-1px);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+button:focus-visible {
+  outline-color: var(--ring);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.ghost {
+  min-height: var(--control-sm);
+  padding: 0 var(--space-xs);
+  border-color: var(--border);
+  background: var(--background);
+  color: var(--muted-foreground);
+  font-size: var(--text-2xs);
+}
+
+button.ghost:hover:not(:disabled) {
+  background: var(--muted);
+  color: var(--foreground);
+  transform: none;
+}
+
+/* Destructive reads in the destructive colour, never as a red block. */
+button.ghost.danger {
+  color: var(--destructive);
+}
+
+button.ghost.danger:hover:not(:disabled) {
+  border-color: var(--destructive);
+  background: transparent;
+  color: var(--destructive);
+}
+
+/* --------------------------------------------------------------------------
+   Lists
+   -------------------------------------------------------------------------- */
+
+.ledger {
+  display: grid;
+  gap: var(--space-2xs);
+}
+
+.entry {
+  padding: var(--space-xs);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--background);
+}
+
+.entry-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  flex-wrap: wrap;
+}
+
+.name {
+  font-weight: 500;
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3xs);
+  padding: 0.0625rem var(--space-2xs);
+  border-radius: var(--radius-pill);
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  white-space: nowrap;
+}
+
+.meta {
+  margin-top: 0.125rem;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+
+.error {
+  margin-top: var(--space-3xs);
+  font-size: var(--text-xs);
+  color: var(--destructive);
+  overflow-wrap: anywhere;
+}
+
+.empty {
+  padding: var(--space-xs);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+}
+
+/* A workflow's inputs: which ones this file actually exposes. */
+.slots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3xs);
+  margin-top: var(--space-2xs);
+}
+
+.tag {
+  padding: 0.0625rem var(--space-2xs);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+.tag.on {
+  border-color: color-mix(in oklab, var(--tag-detected) 70%, var(--border));
+  background: color-mix(in oklab, var(--tag-detected) 16%, transparent);
+  color: var(--foreground);
+}
+
+.tag.over {
+  border-color: color-mix(in oklab, var(--tag-override) 70%, var(--border));
+  background: color-mix(in oklab, var(--tag-override) 16%, transparent);
+  color: var(--foreground);
+}
+
+/* Pushes whatever follows it to the end of the row. */
+.spacer {
+  flex: 1;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3xs);
+  margin-top: var(--space-3xs);
+  font-size: var(--text-2xs);
+  color: var(--muted-foreground);
+}
+
+.check input {
+  width: auto;
+  min-height: 0;
+  margin: 0;
+  accent-color: var(--primary);
+}
+
+/* The child process's own words, so a wrong command explains itself. */
+.log {
+  max-height: 14rem;
+  margin: var(--space-2xs) 0 0;
+  padding: var(--space-2xs);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--background);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* --------------------------------------------------------------------------
+   Outputs — the one surface that stays neutral
+   -------------------------------------------------------------------------- */
+
+.outputs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2xs);
+  margin-top: var(--space-2xs);
+}
+
+.outputs img,
+.outputs video {
+  display: block;
+  max-width: 15rem;
+  max-height: 12.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--canvas);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  button:hover:not(:disabled) {
+    transform: none;
+  }
+}

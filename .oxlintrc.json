@@ -1,0 +1,22 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc"],
+  "categories": {
+    "correctness": "error"
+  },
+  "rules": {
+    "eslint/no-shadow": "error",
+    "eslint/no-unneeded-ternary": "error",
+    "eslint/no-unused-vars": [
+      "error",
+      { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_", "caughtErrorsIgnorePattern": "^_" }
+    ],
+    "eslint/preserve-caught-error": "error",
+    "promise/no-multiple-resolved": "error",
+    "unicorn/prefer-node-protocol": "error"
+  },
+  "env": {
+    "builtin": true,
+    "browser": true
+  }
+}
