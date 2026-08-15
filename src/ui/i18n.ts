@@ -57,6 +57,10 @@ const STRINGS = {
     ja: "このマシンの生成を停止しますか？\n\nComfyUI を終了するため、生成中のものは失われます。",
   },
   "mode.stopping": { en: "stopping ComfyUI…", ja: "ComfyUI を終了しています…" },
+  "mode.needsComfy": {
+    en: "start ComfyUI before choosing what it takes on",
+    ja: "先に ComfyUI を起動してください",
+  },
   "mode.saveFailed": { en: "could not change it", ja: "変更できませんでした" },
 
   // The desktop menu, mirrored by the tray -----------------------------------

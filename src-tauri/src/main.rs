@@ -99,6 +99,14 @@ impl ModeItems {
         let _ = self.local.set_checked(mode == "local");
         let _ = self.paused.set_checked(mode == "paused");
     }
+
+    /// Greyed out while no ComfyUI answers, which is the same thing the page
+    /// does to its own picker: all three say what ComfyUI is to do.
+    fn enable(&self, on: bool) {
+        let _ = self.accepting.set_enabled(on);
+        let _ = self.local.set_enabled(on);
+        let _ = self.paused.set_enabled(on);
+    }
 }
 
 /// The parts of the shell that outlive a single handler.
@@ -152,6 +160,14 @@ fn apply_state(app: &AppHandle, modes: &ModeItems, state: &serde_json::Value) {
     if let Some(mode) = state.get("mode").and_then(serde_json::Value::as_str) {
         modes.show(mode);
     }
+
+    modes.enable(
+        state
+            .get("comfy")
+            .and_then(|comfy| comfy.get("comfyStatus"))
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|status| status != "unavailable"),
+    );
 
     let desktop = state.get("desktop");
 
@@ -252,12 +268,14 @@ fn main() {
             let open = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
             // Disabled, so it reads as the heading for the three under it.
             let heading = MenuItem::with_id(app, "heading", "Generation", false, None::<&str>)?;
+            // All three start greyed out. ComfyUI is not running this early, and
+            // the first poll enables them if it turns out to be.
             let modes = ModeItems {
                 accepting: CheckMenuItem::with_id(
                     app,
                     "mode-accepting",
                     "Accepting",
-                    true,
+                    false,
                     true,
                     None::<&str>,
                 )?,
@@ -265,7 +283,7 @@ fn main() {
                     app,
                     "mode-local",
                     "Not accepting",
-                    true,
+                    false,
                     false,
                     None::<&str>,
                 )?,
@@ -273,7 +291,7 @@ fn main() {
                     app,
                     "mode-paused",
                     "Stopped",
-                    true,
+                    false,
                     false,
                     None::<&str>,
                 )?,

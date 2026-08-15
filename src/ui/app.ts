@@ -646,7 +646,14 @@ function modeLabel(mode: RunMode): string {
 function syncMode(state: State): void {
   nodes.modeDot.className = `dot ${MODE_TONE[state.mode]}`;
   nodes.modeLabel.textContent = modeLabel(state.mode);
-  nodes.modeOpen.title = t("mode.label");
+
+  // All three states say what ComfyUI is to do, so with no ComfyUI answering
+  // there is nothing to choose between. The stored one still shows, greyed:
+  // hiding it would lose the only place that says what this machine is set to.
+  const up = state.comfy.comfyStatus !== "unavailable";
+  nodes.modeOpen.disabled = !up;
+  nodes.modeOpen.title = up ? t("mode.label") : t("mode.needsComfy");
+  if (!up && !nodes.modePanel.hidden) openPopover(null);
 
   for (const option of document.querySelectorAll<HTMLElement>("[data-mode]")) {
     option.setAttribute("aria-pressed", String(option.dataset["mode"] === state.mode));

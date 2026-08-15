@@ -100,6 +100,10 @@ want to do with it yourself.
 *Stopped* is the heavy one. It shuts ComfyUI down to give the GPU back, which
 takes the running generation with it, so it asks before it does.
 
+All three say what ComfyUI is to do, so the picker is greyed out until ComfyUI
+is up: start it first, then say what it takes on. A machine whose ComfyUI is not
+answering claims nothing from a job server either, whatever its state says.
+
 The same three are in the tray, so it can be changed with the window closed.
 
 ## The tray

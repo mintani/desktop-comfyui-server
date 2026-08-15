@@ -8,7 +8,7 @@ import {
   UPDATE_CHECK_INTERVAL_MS,
 } from "./config";
 import { completeJob, failJob, markQueued, startJob } from "./jobs";
-import { refreshStatus } from "./status";
+import { latestStatus, refreshStatus } from "./status";
 import { RESTART_EXIT_CODE, remoteHasUpdate } from "./updater";
 import { loadSettings } from "./settings";
 import {
@@ -181,6 +181,14 @@ async function runPoll() {
     // upstream still sees this host as alive — its queue simply is not drained
     // from here.
     if ((await loadSettings()).mode !== "accepting") {
+      await idle(POLL_INTERVAL_MS);
+      continue;
+    }
+
+    // Nothing to run the job on. The heartbeat has already told the upstream
+    // that ComfyUI here is unavailable, so claiming would contradict what this
+    // machine just said about itself — and the job would only fail.
+    if (latestStatus().comfyStatus === "unavailable") {
       await idle(POLL_INTERVAL_MS);
       continue;
     }

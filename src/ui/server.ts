@@ -12,7 +12,7 @@ import {
   startJob,
 } from "../jobs";
 import { RUN_MODES, loadSettings, newUpstreamId, publicUpstreams, saveSettings } from "../settings";
-import { latestStatus } from "../status";
+import { latestStatus, refreshStatus } from "../status";
 import {
   activeWorkflowName,
   clearWorkflowCache,
@@ -178,6 +178,9 @@ async function handleSettingsSave(req: Request): Promise<Response> {
  * three only decide what is allowed to start; `paused` also shuts ComfyUI down,
  * because the reason for choosing it is wanting the machine back, and a ComfyUI
  * left sitting there still holds the GPU. Both callers ask before sending it.
+ *
+ * All three describe what ComfyUI will do, so none of them can be set without
+ * one: the page and the tray grey the choice out, and this refuses it.
  */
 async function handleMode(req: Request): Promise<Response> {
   try {
@@ -185,10 +188,19 @@ async function handleMode(req: Request): Promise<Response> {
     if (!RUN_MODES.includes(mode as RunMode)) {
       return fail(`mode must be one of ${RUN_MODES.join(", ")}`);
     }
+    if (latestStatus().comfyStatus === "unavailable") {
+      return fail("ComfyUI is not running", 409);
+    }
+
     const saved = await saveSettings({ mode: mode as RunMode });
     // Saved first: a ComfyUI that refuses to die must not leave the machine
     // marked as still accepting work.
-    if (saved.mode === "paused") await stopComfy();
+    if (saved.mode === "paused") {
+      await stopComfy();
+      // The status is polled on a timer, and this just made it wrong. Asking
+      // now is what greys the choice out in the same breath as stopping it.
+      await refreshStatus();
+    }
     return Response.json({ mode: saved.mode });
   } catch (err) {
     return fail(err);
@@ -237,6 +249,9 @@ async function handleComfyStart(): Promise<Response> {
 async function handleComfyStop(): Promise<Response> {
   try {
     await stopComfy();
+    // Rather than let the timer find out: what is now down decides what the
+    // agent claims and whether the run mode can be changed at all.
+    await refreshStatus();
     return Response.json({ ok: true });
   } catch (err) {
     return fail(err, 500);
