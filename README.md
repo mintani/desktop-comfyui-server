@@ -84,18 +84,21 @@ the app's own settings — the same switches the tray menu carries.
 ### What this machine will start
 
 Beside *Start ComfyUI* is a dot with three states, picked the way a chat app
-picks a presence. It never stops what is already running; it decides what is
-allowed to begin.
+picks a presence.
 
-| | | Jobs from a job server | Runs you start here |
-| --- | --- | --- | --- |
-| 🟢 | **Accepting** | yes | yes |
-| 🟡 | **Here only** | no | yes |
-| 🔴 | **Paused** | no | no |
+| | | Jobs from a job server | Runs you start here | ComfyUI |
+| --- | --- | --- | --- | --- |
+| 🟢 | **Accepting** | yes | yes | left alone |
+| 🟡 | **Not accepting** | no | yes | left alone |
+| 🔴 | **Stopped** | no | no | shut down |
 
-*Here only* is the one worth knowing about: it hands the GPU back to you without
-disconnecting from anything. Job servers still see the machine, they just get
-nothing from it until you switch back.
+*Not accepting* is the one worth knowing about. It stops the queue without
+disconnecting from anything: job servers still see the machine, they just get
+nothing from it until you switch back, and ComfyUI stays up for whatever you
+want to do with it yourself.
+
+*Stopped* is the heavy one. It shuts ComfyUI down to give the GPU back, which
+takes the running generation with it, so it asks before it does.
 
 The same three are in the tray, so it can be changed with the window closed.
 
@@ -106,7 +109,7 @@ Closing the window does not stop anything. The app stays in the tray with:
 | Menu item | What it does |
 | --------- | ------------ |
 | **Open** | brings the window back |
-| **Generation** | the three states below |
+| **Generation** | the three states above, *Stopped* asking first |
 | **Stop ComfyUI** | stops the ComfyUI this app started |
 | **Quit** | stops the app and its server |
 
@@ -219,7 +222,8 @@ A claimed job looks like:
 its own values and a random seed.
 
 Because ComfyUI is a single machine, jobs are always run one at a time. Switch
-to *Here only* and nothing more is claimed, while the job in flight finishes.
+to *Not accepting* and nothing more is claimed, while the job in flight
+finishes.
 
 ## Without the app
 

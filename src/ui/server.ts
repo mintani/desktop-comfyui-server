@@ -174,8 +174,10 @@ async function handleSettingsSave(req: Request): Promise<Response> {
 }
 
 /**
- * The run mode, reachable from the page and from the tray menu. Nothing is
- * stopped by it — it decides what is allowed to start.
+ * The run mode, reachable from the page and from the tray menu. Two of the
+ * three only decide what is allowed to start; `paused` also shuts ComfyUI down,
+ * because the reason for choosing it is wanting the machine back, and a ComfyUI
+ * left sitting there still holds the GPU. Both callers ask before sending it.
  */
 async function handleMode(req: Request): Promise<Response> {
   try {
@@ -184,6 +186,9 @@ async function handleMode(req: Request): Promise<Response> {
       return fail(`mode must be one of ${RUN_MODES.join(", ")}`);
     }
     const saved = await saveSettings({ mode: mode as RunMode });
+    // Saved first: a ComfyUI that refuses to die must not leave the machine
+    // marked as still accepting work.
+    if (saved.mode === "paused") await stopComfy();
     return Response.json({ mode: saved.mode });
   } catch (err) {
     return fail(err);

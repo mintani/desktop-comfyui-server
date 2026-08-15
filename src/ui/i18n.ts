@@ -42,16 +42,21 @@ const STRINGS = {
     en: "Jobs from your job servers, and runs started here.",
     ja: "ジョブサーバーからの仕事も、ここからの実行も動きます。",
   },
-  "mode.local": { en: "Here only", ja: "ここだけ" },
+  "mode.local": { en: "Not accepting", ja: "受付停止" },
   "mode.localNote": {
-    en: "Job servers get nothing. You can still run workflows yourself.",
-    ja: "ジョブサーバーからは受け取りません。自分の実行だけ動きます。",
+    en: "Job servers get nothing. ComfyUI stays up for your own runs.",
+    ja: "ジョブサーバーからは受け取りません。ComfyUI はそのまま、自分の実行は動きます。",
   },
-  "mode.paused": { en: "Paused", ja: "停止中" },
+  "mode.paused": { en: "Stopped", ja: "停止" },
   "mode.pausedNote": {
-    en: "Nothing new starts. Whatever is running finishes.",
-    ja: "新規は何も始めません。実行中のものは最後まで動きます。",
+    en: "ComfyUI is shut down. Nothing runs until you pick another.",
+    ja: "ComfyUI を終了します。他を選ぶまで何も動きません。",
   },
+  "mode.stopConfirm": {
+    en: "Stop generation on this machine?\n\nComfyUI is shut down, so anything still generating is lost.",
+    ja: "このマシンの生成を停止しますか？\n\nComfyUI を終了するため、生成中のものは失われます。",
+  },
+  "mode.stopping": { en: "stopping ComfyUI…", ja: "ComfyUI を終了しています…" },
   "mode.saveFailed": { en: "could not change it", ja: "変更できませんでした" },
 
   // The desktop menu, mirrored by the tray -----------------------------------

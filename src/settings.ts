@@ -45,7 +45,7 @@ export type RunMode =
   | "accepting"
   /** No upstream jobs; runs started here still go. */
   | "local"
-  /** Nothing new starts at all. */
+  /** Nothing starts, and ComfyUI itself is shut down. */
   | "paused";
 
 export const RUN_MODES: RunMode[] = ["accepting", "local", "paused"];

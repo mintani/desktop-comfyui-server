@@ -34,6 +34,7 @@ use tauri::menu::{CheckMenuItem, MenuBuilder, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent, Wry};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 use uuid::Uuid;
@@ -186,6 +187,7 @@ fn apply_state(app: &AppHandle, modes: &ModeItems, state: &serde_json::Value) {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             None,
@@ -262,7 +264,7 @@ fn main() {
                 local: CheckMenuItem::with_id(
                     app,
                     "mode-local",
-                    "Here only",
+                    "Not accepting",
                     true,
                     false,
                     None::<&str>,
@@ -270,7 +272,7 @@ fn main() {
                 paused: CheckMenuItem::with_id(
                     app,
                     "mode-paused",
-                    "Paused",
+                    "Stopped",
                     true,
                     false,
                     None::<&str>,
@@ -303,7 +305,7 @@ fn main() {
                 .show_menu_on_left_click(true)
                 .on_menu_event(move |app, event| match event.id.as_ref() {
                     "open" => show_window(app),
-                    id @ ("mode-accepting" | "mode-local" | "mode-paused") => {
+                    id @ ("mode-accepting" | "mode-local") => {
                         // Clicking ticked whichever was pressed; untick the
                         // others now rather than waiting for the next poll.
                         let mode = id.trim_start_matches("mode-").to_string();
@@ -313,6 +315,37 @@ fn main() {
                         tauri::async_runtime::spawn(async move {
                             api.post("/api/mode", serde_json::json!({ "mode": mode })).await;
                         });
+                    }
+                    // The one entry that loses work: the server shuts ComfyUI
+                    // down for this mode, so a generation in flight dies with
+                    // it. Asked here as well as in the page. The click has
+                    // already ticked the item; nothing is undone on a refusal
+                    // because the menu is shut and the poll corrects it before
+                    // it can be opened again.
+                    "mode-paused" => {
+                        let api = menu_api.clone();
+                        let modes = menu_modes.clone();
+
+                        app.dialog()
+                            .message(
+                                "ComfyUI will be shut down, and anything still generating is lost.",
+                            )
+                            .title("Stop generation on this machine?")
+                            .kind(MessageDialogKind::Warning)
+                            .buttons(MessageDialogButtons::OkCancelCustom(
+                                "Stop".to_string(),
+                                "Cancel".to_string(),
+                            ))
+                            .show(move |confirmed| {
+                                if !confirmed {
+                                    return;
+                                }
+                                modes.show("paused");
+                                tauri::async_runtime::spawn(async move {
+                                    api.post("/api/mode", serde_json::json!({ "mode": "paused" }))
+                                        .await;
+                                });
+                            });
                     }
                     "stop-comfy" => {
                         let api = menu_api.clone();

@@ -12,6 +12,8 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-shell = "2"
 tauri-plugin-autostart = "2"
+# One dialog: the tray asking before it shuts ComfyUI down.
+tauri-plugin-dialog = "2"
 # Only ever talks to 127.0.0.1, so no TLS backend is pulled in.
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 serde_json = "1"

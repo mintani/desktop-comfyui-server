@@ -1107,6 +1107,15 @@ nodes.modePanel.addEventListener("click", async (event) => {
   const mode = (event.target as HTMLElement).closest<HTMLElement>("[data-mode]")?.dataset["mode"];
   if (!mode) return;
 
+  // The only one that destroys work: it shuts ComfyUI down, so a generation in
+  // flight dies with it. The other two are free to undo, and are not asked
+  // about. The panel stays open on a refusal, so nothing looks like it happened.
+  if (mode === "paused") {
+    if (!confirm(t("mode.stopConfirm"))) return;
+    // The request waits for ComfyUI to actually be gone, which is not instant.
+    setNote(nodes.modeNote, t("mode.stopping"));
+  }
+
   const result = await post("/api/mode", { mode });
   if (!result.ok) {
     setNote(nodes.modeNote, result.error ?? t("mode.saveFailed"), true);
