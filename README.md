@@ -81,6 +81,24 @@ starts sending work.
 The header switches the theme and the language, and the button beside them opens
 the app's own settings — the same switches the tray menu carries.
 
+### What this machine will start
+
+Beside *Start ComfyUI* is a dot with three states, picked the way a chat app
+picks a presence. It never stops what is already running; it decides what is
+allowed to begin.
+
+| | | Jobs from a job server | Runs you start here |
+| --- | --- | --- | --- |
+| 🟢 | **Accepting** | yes | yes |
+| 🟡 | **Here only** | no | yes |
+| 🔴 | **Paused** | no | no |
+
+*Here only* is the one worth knowing about: it hands the GPU back to you without
+disconnecting from anything. Job servers still see the machine, they just get
+nothing from it until you switch back.
+
+The same three are in the tray, so it can be changed with the window closed.
+
 ## The tray
 
 Closing the window does not stop anything. The app stays in the tray with:
@@ -88,7 +106,7 @@ Closing the window does not stop anything. The app stays in the tray with:
 | Menu item | What it does |
 | --------- | ------------ |
 | **Open** | brings the window back |
-| **Accept new work** | untick to stop claiming jobs and refuse new runs. Whatever is already running finishes |
+| **Generation** | the three states below |
 | **Stop ComfyUI** | stops the ComfyUI this app started |
 | **Quit** | stops the app and its server |
 
@@ -200,8 +218,8 @@ A claimed job looks like:
 `workflow` and `params` are optional; without them the active workflow runs with
 its own values and a random seed.
 
-Because ComfyUI is a single machine, jobs are always run one at a time. Untick
-*Accept new work* and nothing new is claimed, while the job in flight finishes.
+Because ComfyUI is a single machine, jobs are always run one at a time. Switch
+to *Here only* and nothing more is claimed, while the job in flight finishes.
 
 ## Without the app
 
@@ -227,7 +245,7 @@ with comments; the ones you are most likely to touch:
 | Variable      | Default                 | Meaning                                    |
 | ------------- | ----------------------- | ------------------------------------------ |
 | `COMFY_URL`   | `http://localhost:8188` | ComfyUI on this machine                    |
-| `COMFY_DIR`   | unset                   | where ComfyUI is installed, so it can be started |
+| `COMFY_DIR`   | unset                   | where ComfyUI is installed                 |
 | `UI_PORT`     | `3939`                  | management UI port                         |
 | `UI_HOSTNAME` | `127.0.0.1`             | set to `0.0.0.0` to reach it from the LAN  |
 | `UI_TOKEN`    | unset                   | shared secret for the UI                   |

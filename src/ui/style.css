@@ -35,6 +35,9 @@
   --destructive: oklch(52% 0.2 27.3);
   --ok: oklch(48% 0.13 164);
   --warn: oklch(52% 0.12 328);
+  /* The middle of the three run states. Amber because a traffic light is the
+     one place a palette does not get to be clever. */
+  --idle: oklch(62% 0.14 75);
 
   --border: oklch(30.5% 0 0 / 12%);
   --input: oklch(30.5% 0 0 / 18%);
@@ -103,6 +106,7 @@
   --destructive: oklch(70.4% 0.191 22.2);
   --ok: oklch(85.6% 0.137 164);
   --warn: oklch(81.6% 0.119 328);
+  --idle: oklch(82% 0.14 75);
 
   --border: oklch(100% 0 0 / 12%);
   --input: oklch(100% 0 0 / 16%);
@@ -359,6 +363,63 @@ a {
   accent-color: var(--primary);
 }
 
+/* The run-state picker: a dot and its name, then three of them under it. */
+.mode-button .dot {
+  width: 0.5rem;
+  height: 0.5rem;
+}
+
+.mode-menu {
+  width: 15rem;
+  padding: var(--space-2xs);
+}
+
+.mode-menu .popover-head {
+  padding: 0 var(--space-2xs);
+}
+
+.mode-option {
+  display: flex;
+  align-items: start;
+  gap: var(--space-2xs);
+  width: 100%;
+  min-height: 0;
+  padding: var(--space-2xs);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--foreground);
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  text-align: start;
+  white-space: normal;
+}
+
+.mode-option:hover:not(:disabled) {
+  background: var(--muted);
+  color: var(--foreground);
+  transform: none;
+}
+
+.mode-option .dot {
+  margin-top: 0.3rem;
+}
+
+.mode-option strong {
+  display: block;
+  font-weight: 500;
+}
+
+.mode-option .muted {
+  display: block;
+  line-height: 1.4;
+}
+
+/* The one in force reads as chosen without a tick taking up a column. */
+.mode-option[aria-pressed="true"] {
+  background: var(--secondary);
+}
+
 /* An icon-only button, sized square so it sits with the segmented controls. */
 button.ghost.square {
   width: var(--control-sm);
@@ -416,6 +477,9 @@ button.ghost.square svg {
 }
 .dot.warn {
   background: var(--warn);
+}
+.dot.idle {
+  background: var(--idle);
 }
 .dot.bad {
   background: var(--destructive);

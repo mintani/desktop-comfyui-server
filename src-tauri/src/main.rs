@@ -83,6 +83,23 @@ impl Api {
     }
 }
 
+/// The three tray entries that stand for the run mode. Only one is ever
+/// ticked, which is what makes them read as a choice rather than as switches.
+#[derive(Clone)]
+struct ModeItems {
+    accepting: CheckMenuItem<Wry>,
+    local: CheckMenuItem<Wry>,
+    paused: CheckMenuItem<Wry>,
+}
+
+impl ModeItems {
+    fn show(&self, mode: &str) {
+        let _ = self.accepting.set_checked(mode == "accepting");
+        let _ = self.local.set_checked(mode == "local");
+        let _ = self.paused.set_checked(mode == "paused");
+    }
+}
+
 /// The parts of the shell that outlive a single handler.
 struct Shell {
     server: Mutex<Option<CommandChild>>,
@@ -130,9 +147,9 @@ fn show_window(app: &AppHandle) {
 
 /// Take what the server says and make the shell match it. Called on a timer,
 /// so a switch flipped in the page shows up in the tray a moment later.
-fn apply_state(app: &AppHandle, accepting: &CheckMenuItem<Wry>, state: &serde_json::Value) {
-    if let Some(value) = state.get("accepting").and_then(serde_json::Value::as_bool) {
-        let _ = accepting.set_checked(value);
+fn apply_state(app: &AppHandle, modes: &ModeItems, state: &serde_json::Value) {
+    if let Some(mode) = state.get("mode").and_then(serde_json::Value::as_str) {
+        modes.show(mode);
     }
 
     let desktop = state.get("desktop");
@@ -231,13 +248,41 @@ fn main() {
             // The tray. Its labels are English only: the page's language lives
             // in the browser, which this side cannot read.
             let open = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
-            let accepting =
-                CheckMenuItem::with_id(app, "accepting", "Accept new work", true, true, None::<&str>)?;
+            // Disabled, so it reads as the heading for the three under it.
+            let heading = MenuItem::with_id(app, "heading", "Generation", false, None::<&str>)?;
+            let modes = ModeItems {
+                accepting: CheckMenuItem::with_id(
+                    app,
+                    "mode-accepting",
+                    "Accepting",
+                    true,
+                    true,
+                    None::<&str>,
+                )?,
+                local: CheckMenuItem::with_id(
+                    app,
+                    "mode-local",
+                    "Here only",
+                    true,
+                    false,
+                    None::<&str>,
+                )?,
+                paused: CheckMenuItem::with_id(
+                    app,
+                    "mode-paused",
+                    "Paused",
+                    true,
+                    false,
+                    None::<&str>,
+                )?,
+            };
             let stop_comfy = MenuItem::with_id(app, "stop-comfy", "Stop ComfyUI", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
             let menu = MenuBuilder::new(app)
-                .items(&[&open, &accepting])
+                .items(&[&open])
+                .separator()
+                .items(&[&heading, &modes.accepting, &modes.local, &modes.paused])
                 .separator()
                 .items(&[&stop_comfy])
                 .separator()
@@ -245,7 +290,7 @@ fn main() {
                 .build()?;
 
             let menu_api = api.clone();
-            let menu_accepting = accepting.clone();
+            let menu_modes = modes.clone();
 
             TrayIconBuilder::with_id("main")
                 .icon(
@@ -258,14 +303,15 @@ fn main() {
                 .show_menu_on_left_click(true)
                 .on_menu_event(move |app, event| match event.id.as_ref() {
                     "open" => show_window(app),
-                    "accepting" => {
-                        // The item has already toggled itself; the server is
-                        // told what it now shows.
-                        let wanted = menu_accepting.is_checked().unwrap_or(true);
+                    id @ ("mode-accepting" | "mode-local" | "mode-paused") => {
+                        // Clicking ticked whichever was pressed; untick the
+                        // others now rather than waiting for the next poll.
+                        let mode = id.trim_start_matches("mode-").to_string();
+                        menu_modes.show(&mode);
+
                         let api = menu_api.clone();
                         tauri::async_runtime::spawn(async move {
-                            api.post("/api/accepting", serde_json::json!({ "accepting": wanted }))
-                                .await;
+                            api.post("/api/mode", serde_json::json!({ "mode": mode })).await;
                         });
                     }
                     "stop-comfy" => {
@@ -323,7 +369,7 @@ fn main() {
             tauri::async_runtime::spawn(async move {
                 loop {
                     if let Some(state) = sync_api.state().await {
-                        apply_state(&sync_handle, &accepting, &state);
+                        apply_state(&sync_handle, &modes, &state);
                     }
                     tokio::time::sleep(Duration::from_secs(2)).await;
                 }

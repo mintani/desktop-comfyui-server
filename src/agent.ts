@@ -177,9 +177,10 @@ async function runPoll() {
       }
     }
 
-    // Paused means "claim nothing". Heartbeats carry on, so the upstream still
-    // sees this host as alive — its queue simply is not drained from here.
-    if (!(await loadSettings()).accepting) {
+    // Only the first mode claims. Heartbeats carry on either way, so the
+    // upstream still sees this host as alive — its queue simply is not drained
+    // from here.
+    if ((await loadSettings()).mode !== "accepting") {
       await idle(POLL_INTERVAL_MS);
       continue;
     }

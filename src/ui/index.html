@@ -66,6 +66,47 @@
 
         <button type="button" class="ghost" id="comfy-power">Start ComfyUI</button>
 
+        <!-- What this machine will start, picked the way a chat app picks a
+             presence: a dot you press, three states under it. -->
+        <div class="menu">
+          <button
+            type="button"
+            class="ghost mode-button"
+            id="mode-open"
+            aria-haspopup="true"
+            aria-expanded="false"
+          >
+            <span class="dot" id="mode-dot"></span>
+            <span id="mode-label"></span>
+          </button>
+
+          <div class="popover mode-menu" id="mode-panel" hidden>
+            <p class="popover-head" data-i18n="mode.label">Generation</p>
+            <button type="button" class="mode-option" data-mode="accepting">
+              <span class="dot ok"></span>
+              <span>
+                <strong data-i18n="mode.accepting">Accepting</strong>
+                <span class="muted" data-i18n="mode.acceptingNote"></span>
+              </span>
+            </button>
+            <button type="button" class="mode-option" data-mode="local">
+              <span class="dot idle"></span>
+              <span>
+                <strong data-i18n="mode.local">Here only</strong>
+                <span class="muted" data-i18n="mode.localNote"></span>
+              </span>
+            </button>
+            <button type="button" class="mode-option" data-mode="paused">
+              <span class="dot bad"></span>
+              <span>
+                <strong data-i18n="mode.paused">Paused</strong>
+                <span class="muted" data-i18n="mode.pausedNote"></span>
+              </span>
+            </button>
+            <p class="muted" id="mode-note"></p>
+          </div>
+        </div>
+
         <!-- Everything the tray menu offers, for when the window is open. -->
         <div class="menu">
           <button
@@ -94,12 +135,6 @@
 
           <div class="popover" id="desktop-panel" hidden>
             <p class="popover-head" data-i18n="desktop.title">Desktop app</p>
-
-            <label class="switch">
-              <input type="checkbox" id="desktop-accepting" />
-              <span data-i18n="desktop.accepting">Accept new work</span>
-            </label>
-            <p class="muted" data-i18n="desktop.acceptingNote"></p>
 
             <label class="switch">
               <input type="checkbox" id="desktop-autostart" />

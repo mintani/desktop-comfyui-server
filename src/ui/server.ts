@@ -11,7 +11,7 @@ import {
   removeJob,
   startJob,
 } from "../jobs";
-import { loadSettings, newUpstreamId, publicUpstreams, saveSettings } from "../settings";
+import { RUN_MODES, loadSettings, newUpstreamId, publicUpstreams, saveSettings } from "../settings";
 import { latestStatus } from "../status";
 import {
   activeWorkflowName,
@@ -25,7 +25,7 @@ import {
 } from "../workflow";
 import { authorise } from "./guard";
 import index from "./index.html";
-import type { UpstreamConfig } from "../settings";
+import type { RunMode, UpstreamConfig } from "../settings";
 import type { RunParams } from "../types";
 
 function message(err: unknown): string {
@@ -48,7 +48,7 @@ async function handleState(): Promise<Response> {
     agent: agentSnapshot(),
     upstreams: publicUpstreams(settings),
     settings: { comfyDir: settings.comfyDir, comfyCommand: settings.comfyCommand },
-    accepting: settings.accepting,
+    mode: settings.mode,
     desktop: settings.desktop,
     jobs: listJobs(),
   });
@@ -174,15 +174,17 @@ async function handleSettingsSave(req: Request): Promise<Response> {
 }
 
 /**
- * The pause switch, reachable from the page and from the tray menu. Nothing is
+ * The run mode, reachable from the page and from the tray menu. Nothing is
  * stopped by it — it decides what is allowed to start.
  */
-async function handleAccepting(req: Request): Promise<Response> {
+async function handleMode(req: Request): Promise<Response> {
   try {
-    const { accepting } = (await req.json()) as { accepting?: unknown };
-    if (typeof accepting !== "boolean") return fail("accepting must be true or false");
-    const saved = await saveSettings({ accepting });
-    return Response.json({ accepting: saved.accepting });
+    const { mode } = (await req.json()) as { mode?: unknown };
+    if (!RUN_MODES.includes(mode as RunMode)) {
+      return fail(`mode must be one of ${RUN_MODES.join(", ")}`);
+    }
+    const saved = await saveSettings({ mode: mode as RunMode });
+    return Response.json({ mode: saved.mode });
   } catch (err) {
     return fail(err);
   }
@@ -275,7 +277,7 @@ function handleJobsClear(): Response {
  */
 async function handleRun(req: Request): Promise<Response> {
   try {
-    if (!(await loadSettings()).accepting) return fail("new work is paused", 409);
+    if ((await loadSettings()).mode === "paused") return fail("new work is paused", 409);
 
     const form = await req.formData();
 
@@ -391,7 +393,7 @@ export function startUi() {
       "/api/upstreams": { POST: guarded(handleUpstreamsSave) },
 
       "/api/settings": { POST: guarded(handleSettingsSave) },
-      "/api/accepting": { POST: guarded(handleAccepting) },
+      "/api/mode": { POST: guarded(handleMode) },
       "/api/desktop": { POST: guarded(handleDesktopSave) },
       "/api/comfy/start": { POST: guarded(handleComfyStart) },
       "/api/comfy/stop": { POST: guarded(handleComfyStop) },

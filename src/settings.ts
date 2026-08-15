@@ -34,6 +34,22 @@ export type DesktopSettings = {
   closeAction: "tray" | "quit";
 };
 
+/**
+ * How much work this machine takes on.
+ *
+ * The middle one is the reason there are three rather than a switch: wanting
+ * the GPU for yourself is not the same as wanting the tool to stop.
+ */
+export type RunMode =
+  /** Jobs from upstream servers, and runs started here. */
+  | "accepting"
+  /** No upstream jobs; runs started here still go. */
+  | "local"
+  /** Nothing new starts at all. */
+  | "paused";
+
+export const RUN_MODES: RunMode[] = ["accepting", "local", "paused"];
+
 export type Settings = {
   activeWorkflow: string | null;
   /** Where ComfyUI is checked out. Empty until someone fills it in. */
@@ -43,13 +59,12 @@ export type Settings = {
   /** Priority order: the first enabled entry is asked for work first. */
   upstreams: UpstreamConfig[];
   /**
-   * False pauses new work: nothing is claimed from upstreams and a run started
-   * here is refused. Whatever is already running is left to finish.
+   * What this machine will start. Never stops what is already running.
    *
-   * Stored rather than reset on start, because a pause is a decision — coming
-   * back up quietly claiming jobs again is the surprising behaviour.
+   * Stored rather than reset on start, because it is a decision — coming back
+   * up quietly claiming jobs again is the surprising behaviour.
    */
-  accepting: boolean;
+  mode: RunMode;
   desktop: DesktopSettings;
 };
 
@@ -58,7 +73,7 @@ const EMPTY: Settings = {
   comfyDir: "",
   comfyCommand: "",
   upstreams: [],
-  accepting: true,
+  mode: "accepting",
   desktop: { autostart: false, closeAction: "tray" },
 };
 
@@ -110,6 +125,13 @@ function hostFromUrl(url: string): string {
 
 let cached: Settings | null = null;
 
+/** Files written before there were three modes stored a boolean instead. */
+function normaliseMode(value: Partial<Settings> & { accepting?: unknown }): RunMode {
+  if (value.mode && RUN_MODES.includes(value.mode)) return value.mode;
+  if (value.accepting === false) return "paused";
+  return "accepting";
+}
+
 function normaliseDesktop(raw: unknown): DesktopSettings {
   const value = (raw ?? {}) as Partial<DesktopSettings>;
   return {
@@ -129,7 +151,7 @@ function normalise(raw: unknown): Settings {
     // An empty stored array is a real choice ("I removed them all"), so only a
     // missing key falls back to the environment.
     upstreams: upstreams ?? upstreamsFromEnv(),
-    accepting: value.accepting !== false,
+    mode: normaliseMode(value),
     desktop: normaliseDesktop(value.desktop),
   };
 }

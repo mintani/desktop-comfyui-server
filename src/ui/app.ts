@@ -8,7 +8,9 @@
  */
 
 import { LANGS, lang, locale, onLangChange, setLang, t } from "./i18n";
-import type { Lang } from "./i18n";
+import type { Key, Lang } from "./i18n";
+
+type RunMode = "accepting" | "local" | "paused";
 
 type Slot = { nodeId: string; input: string; label: string };
 
@@ -93,7 +95,7 @@ type State = {
   };
   upstreams: UpstreamView[];
   settings: { comfyDir: string; comfyCommand: string };
-  accepting: boolean;
+  mode: RunMode;
   desktop: { autostart: boolean; closeAction: "tray" | "quit" };
   jobs: JobRecord[];
 };
@@ -135,7 +137,11 @@ const nodes = {
   settingsNote: el("settings-note"),
   desktopOpen: el<HTMLButtonElement>("desktop-open"),
   desktopPanel: el("desktop-panel"),
-  desktopAccepting: el<HTMLInputElement>("desktop-accepting"),
+  modeOpen: el<HTMLButtonElement>("mode-open"),
+  modePanel: el("mode-panel"),
+  modeDot: el("mode-dot"),
+  modeLabel: el("mode-label"),
+  modeNote: el("mode-note"),
   desktopAutostart: el<HTMLInputElement>("desktop-autostart"),
   desktopNote: el("desktop-note"),
 };
@@ -292,11 +298,7 @@ function renderVitals(state: State): void {
     total === 0
       ? chip(t("vitals.agent"), t("vitals.standalone"))
       : chip(t("vitals.agent"), `${pad(healthy)}/${pad(total)}`, agentTone),
-    chip(
-      t("vitals.work"),
-      state.accepting ? t("vitals.accepting") : t("vitals.paused"),
-      state.accepting ? "ok" : "warn",
-    ),
+    chip(t("vitals.work"), modeLabel(state.mode), MODE_TONE[state.mode]),
   ];
 
   if (comfyProcess.managed) {
@@ -603,6 +605,55 @@ function syncSettings(state: State): void {
 }
 
 // ---------------------------------------------------------------------------
+// Header menus
+// ---------------------------------------------------------------------------
+
+type Popover = { button: HTMLElement; panel: HTMLElement };
+
+const MODE_POPOVER: Popover = { button: nodes.modeOpen, panel: nodes.modePanel };
+const DESKTOP_POPOVER: Popover = { button: nodes.desktopOpen, panel: nodes.desktopPanel };
+const POPOVERS = [MODE_POPOVER, DESKTOP_POPOVER];
+
+/** One at a time, and `null` closes them all. */
+function openPopover(target: Popover | null): void {
+  for (const popover of POPOVERS) {
+    const open = popover === target;
+    popover.panel.hidden = !open;
+    popover.button.setAttribute("aria-expanded", String(open));
+  }
+  if (target !== DESKTOP_POPOVER) setNote(nodes.desktopNote, "");
+  if (target !== MODE_POPOVER) setNote(nodes.modeNote, "");
+}
+
+function toggle(popover: Popover): void {
+  openPopover(popover.panel.hidden ? popover : null);
+}
+
+// ---------------------------------------------------------------------------
+// Run mode — what this machine will start
+// ---------------------------------------------------------------------------
+
+const MODE_TONE: Record<RunMode, string> = {
+  accepting: "ok",
+  local: "idle",
+  paused: "bad",
+};
+
+function modeLabel(mode: RunMode): string {
+  return t(`mode.${mode}` as Key);
+}
+
+function syncMode(state: State): void {
+  nodes.modeDot.className = `dot ${MODE_TONE[state.mode]}`;
+  nodes.modeLabel.textContent = modeLabel(state.mode);
+  nodes.modeOpen.title = t("mode.label");
+
+  for (const option of document.querySelectorAll<HTMLElement>("[data-mode]")) {
+    option.setAttribute("aria-pressed", String(option.dataset["mode"] === state.mode));
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Desktop menu — the same switches the tray menu carries
 // ---------------------------------------------------------------------------
 
@@ -611,7 +662,6 @@ let desktopBusy = false;
 
 function syncDesktop(state: State): void {
   if (desktopBusy) return;
-  nodes.desktopAccepting.checked = state.accepting;
   nodes.desktopAutostart.checked = state.desktop.autostart;
   for (const button of document.querySelectorAll<HTMLButtonElement>("[data-close-action]")) {
     button.setAttribute(
@@ -619,12 +669,6 @@ function syncDesktop(state: State): void {
       String(button.dataset["closeAction"] === state.desktop.closeAction),
     );
   }
-}
-
-function openDesktopMenu(open: boolean): void {
-  nodes.desktopPanel.hidden = !open;
-  nodes.desktopOpen.setAttribute("aria-expanded", String(open));
-  if (!open) setNote(nodes.desktopNote, "");
 }
 
 /** Send one switch, then let the next poll confirm it. */
@@ -669,8 +713,9 @@ function syncForm(state: State): void {
     nodes.select.value = pick(state.activeWorkflow);
   }
 
-  nodes.submit.disabled = valid.length === 0 || !state.accepting;
-  nodes.submit.title = state.accepting ? "" : t("run.paused");
+  const paused = state.mode === "paused";
+  nodes.submit.disabled = valid.length === 0 || paused;
+  nodes.submit.title = paused ? t("run.paused") : "";
 
   const selected = state.workflows.find((summary) => summary.name === nodes.select.value);
   const slots = selected?.slots;
@@ -707,6 +752,7 @@ function render(state: State): void {
   syncServers(state);
   renderJobs(state);
   syncSettings(state);
+  syncMode(state);
   syncDesktop(state);
   syncForm(state);
 }
@@ -1041,24 +1087,33 @@ async function toggleComfy(): Promise<void> {
 nodes.comfyPower.addEventListener("click", () => void toggleComfy());
 nodes.comfyPower2.addEventListener("click", () => void toggleComfy());
 
-nodes.desktopOpen.addEventListener("click", () => {
-  openDesktopMenu(Boolean(nodes.desktopPanel.hidden));
-});
+nodes.desktopOpen.addEventListener("click", () => toggle(DESKTOP_POPOVER));
+nodes.modeOpen.addEventListener("click", () => toggle(MODE_POPOVER));
 
-// Anywhere outside closes it, which is what a menu is expected to do.
+// Anywhere outside closes them, which is what a menu is expected to do.
 document.addEventListener("click", (event) => {
-  if (nodes.desktopPanel.hidden) return;
   const target = event.target as Node;
-  if (nodes.desktopPanel.contains(target) || nodes.desktopOpen.contains(target)) return;
-  openDesktopMenu(false);
+  const inside = POPOVERS.some(
+    (popover) => popover.panel.contains(target) || popover.button.contains(target),
+  );
+  if (!inside) openPopover(null);
 });
 
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") openDesktopMenu(false);
+  if (event.key === "Escape") openPopover(null);
 });
 
-nodes.desktopAccepting.addEventListener("change", () => {
-  void saveDesktop("/api/accepting", { accepting: nodes.desktopAccepting.checked });
+nodes.modePanel.addEventListener("click", async (event) => {
+  const mode = (event.target as HTMLElement).closest<HTMLElement>("[data-mode]")?.dataset["mode"];
+  if (!mode) return;
+
+  const result = await post("/api/mode", { mode });
+  if (!result.ok) {
+    setNote(nodes.modeNote, result.error ?? t("mode.saveFailed"), true);
+    return;
+  }
+  openPopover(null);
+  void poll();
 });
 
 nodes.desktopAutostart.addEventListener("change", () => {

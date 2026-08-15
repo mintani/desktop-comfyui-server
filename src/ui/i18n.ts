@@ -35,13 +35,27 @@ const STRINGS = {
   "theme.system": { en: "System", ja: "システム" },
   "lang.label": { en: "Language", ja: "言語" },
 
+  // What this machine will start ---------------------------------------------
+  "mode.label": { en: "Generation", ja: "生成" },
+  "mode.accepting": { en: "Accepting", ja: "受付中" },
+  "mode.acceptingNote": {
+    en: "Jobs from your job servers, and runs started here.",
+    ja: "ジョブサーバーからの仕事も、ここからの実行も動きます。",
+  },
+  "mode.local": { en: "Here only", ja: "ここだけ" },
+  "mode.localNote": {
+    en: "Job servers get nothing. You can still run workflows yourself.",
+    ja: "ジョブサーバーからは受け取りません。自分の実行だけ動きます。",
+  },
+  "mode.paused": { en: "Paused", ja: "停止中" },
+  "mode.pausedNote": {
+    en: "Nothing new starts. Whatever is running finishes.",
+    ja: "新規は何も始めません。実行中のものは最後まで動きます。",
+  },
+  "mode.saveFailed": { en: "could not change it", ja: "変更できませんでした" },
+
   // The desktop menu, mirrored by the tray -----------------------------------
   "desktop.title": { en: "Desktop app", ja: "デスクトップアプリ" },
-  "desktop.accepting": { en: "Accept new work", ja: "新規の受付" },
-  "desktop.acceptingNote": {
-    en: "Turning this off stops new jobs. Anything already running finishes.",
-    ja: "外すと新規の受付だけ止まります。実行中のものは最後まで動きます。",
-  },
   "desktop.autostart": { en: "Start when the computer starts", ja: "PC 起動時に起動する" },
   "desktop.closeAction": { en: "Closing the window", ja: "ウィンドウを閉じたとき" },
   "desktop.toTray": { en: "Keeps running", ja: "常駐する" },
@@ -66,8 +80,6 @@ const STRINGS = {
   "vitals.process": { en: "process", ja: "プロセス" },
   "vitals.access": { en: "access", ja: "アクセス" },
   "vitals.work": { en: "work", ja: "受付" },
-  "vitals.accepting": { en: "accepting", ja: "受付中" },
-  "vitals.paused": { en: "paused", ja: "停止中" },
   "vitals.tokenNeeded": {
     en: "open this page as ?token=<UI_TOKEN>",
     ja: "?token=<UI_TOKEN> を付けて開いてください",
