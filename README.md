@@ -1,5 +1,7 @@
 # desktop-comfyui-server
 
+<img src="src-tauri/icons/128x128.png" width="88" align="right" alt="" />
+
 Download Setup from releases
 セットアップファイルをreleasesからダウンロードして使用してください。
 このアプリは開発中のためご使用は自己責任でお願いします。
@@ -245,14 +247,32 @@ git tag v0.1.0 && git push origin v0.1.0
 To try a build without announcing one, run the workflow by hand from the Actions
 tab; the installers come back as workflow artifacts instead.
 
-Download `ComfyUI-Server_<version>_x64-setup.exe` and run it. It installs for
-the current user, so there is no admin prompt, and it fetches WebView2 if the
-machine does not already have it. **The installer is not code signed**, so
-Windows shows *"Windows protected your PC"* — choose **More info → Run anyway**.
-Signing it means buying a certificate; until then that warning is expected.
+Download the `*-setup.exe` from
+[Releases](https://github.com/mintani/desktop-comfyui-server/releases) and run
+it. It installs for the current user, so there is no admin prompt, and it
+fetches WebView2 if the machine does not already have it.
 
 Settings, job history and uploaded workflows go to
 `%APPDATA%\dev.mintani.desktop-comfyui-server`.
+
+#### About that Windows warning
+
+**The installer is not code signed**, so Windows shows *"Windows protected your
+PC"* — choose **More info → Run anyway**. Signing needs a paid certificate;
+until there is one, every download will do this, and it says nothing about what
+is inside. What you can check instead:
+
+- Everything the app runs is in this repository. There is no separate download
+  and no telemetry — the server only talks to your ComfyUI and to job servers
+  you add yourself.
+- The installers are built by GitHub Actions from the tagged commit, not
+  uploaded from anyone's machine. The build log for each release is public.
+- It contains exactly two programs: `desktop-comfyui-server.exe`, the window,
+  and `comfyui-server.exe`, the server from `src/`. The size is the Bun runtime
+  compiled into the second one.
+
+If you would rather not trust a binary at all, `bun start` runs the same thing
+from source, or build the installer yourself with the steps below.
 
 To build it on your own Windows machine instead:
 
