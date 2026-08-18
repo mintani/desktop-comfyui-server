@@ -25,6 +25,10 @@ and a pull request for what its branch does as a whole. Those three often read
 the same, which is the point: an issue and the work that answers it are easy to
 line up. Reasoning goes in the body, never in the title.
 
+Titles are English. A body can be in whichever language the discussion is in —
+Japanese is common here — since it is read by whoever is looking at that issue
+rather than by everyone scanning a list.
+
 ## Checks
 
 `lefthook` runs oxlint and oxfmt over staged files on commit. CI repeats them
