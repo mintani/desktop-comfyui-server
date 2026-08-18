@@ -708,6 +708,12 @@ input[type="file"]::file-selector-button {
   cursor: pointer;
 }
 
+.link {
+  margin-bottom: var(--space-2xs);
+  padding-bottom: var(--space-2xs);
+  border-bottom: 1px solid var(--border);
+}
+
 .row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(6rem, 1fr));

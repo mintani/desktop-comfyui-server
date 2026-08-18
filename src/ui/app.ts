@@ -134,6 +134,9 @@ const nodes = {
   workflowDir: el("workflow-dir"),
   servers: el("servers"),
   serversNote: el("servers-note"),
+  linkUrl: el<HTMLInputElement>("link-url"),
+  linkCode: el<HTMLInputElement>("link-code"),
+  linkNote: el("link-note"),
   jobs: el("jobs"),
   form: el<HTMLFormElement>("run-form"),
   select: el<HTMLSelectElement>("run-workflow"),
@@ -1165,6 +1168,33 @@ el("server-add").addEventListener("click", () => {
   ];
   serversDirty = true;
   if (latestState) renderServers(latestState);
+});
+
+/**
+ * The row is written on the server side, so what comes back is the truth and
+ * the editor is resynced onto it — including anything typed but not saved.
+ */
+el("server-link").addEventListener("click", async () => {
+  const url = nodes.linkUrl.value.trim();
+  const code = nodes.linkCode.value.trim();
+  if (!url || !code) {
+    setNote(nodes.linkNote, t("servers.linkNeeds"), true);
+    return;
+  }
+
+  setNote(nodes.linkNote, t("servers.linking"));
+  const result = await post<{ hostName: string | null }>("/api/link", { url, code });
+  if (!result.ok) {
+    setNote(nodes.linkNote, result.error ?? t("servers.linkFailed"), true);
+    return;
+  }
+
+  // Spent on use, so leaving it in the box would only invite a second try.
+  nodes.linkCode.value = "";
+  serversDirty = false;
+  const name = result.data?.hostName;
+  setNote(nodes.linkNote, name ? t("servers.linkedAs", { name }) : t("servers.linked"));
+  void poll();
 });
 
 nodes.servers.addEventListener("input", () => {

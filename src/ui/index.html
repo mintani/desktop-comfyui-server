@@ -405,6 +405,29 @@
               </button>
             </div>
             <p class="muted" data-i18n="servers.help"></p>
+            <div class="link">
+              <p class="muted" data-i18n="servers.linkHelp"></p>
+              <div class="row">
+                <label class="field">
+                  <span data-i18n="servers.linkUrl">Server URL</span>
+                  <input type="text" id="link-url" placeholder="https://queue.example.com" />
+                </label>
+                <label class="field">
+                  <span data-i18n="servers.linkCode">Link code</span>
+                  <input
+                    type="text"
+                    id="link-code"
+                    placeholder="XXXX-XXXX-XXXX"
+                    spellcheck="false"
+                    autocomplete="off"
+                  />
+                </label>
+              </div>
+              <div class="actions">
+                <button type="button" id="server-link" data-i18n="servers.link">Link</button>
+                <p class="muted" id="link-note"></p>
+              </div>
+            </div>
             <div id="servers"></div>
             <div class="actions">
               <button type="button" id="servers-save" data-i18n="servers.save">Save servers</button>
