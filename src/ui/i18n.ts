@@ -287,6 +287,10 @@ const STRINGS = {
   "servers.up": { en: "up", ja: "応答あり" },
   "servers.down": { en: "down", ja: "応答なし" },
   "servers.queued": { en: "{count} waiting", ja: "待ち {count} 件" },
+  "servers.test": { en: "Test", ja: "接続テスト" },
+  "servers.testing": { en: "testing…", ja: "テスト中…" },
+  "servers.testOk": { en: "answered in {ms} ms", ja: "{ms} ms で応答しました" },
+  "servers.testFailed": { en: "no answer — {error}", ja: "応答なし — {error}" },
 
   // Durations ---------------------------------------------------------------
   "time.seconds": { en: "{seconds}s", ja: "{seconds}秒" },
