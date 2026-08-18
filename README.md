@@ -71,8 +71,8 @@ change something.
 - *ComfyUI* — where it is installed, and optionally the command to run there
 - *Process* — start and stop ComfyUI, with the tail of its output so a wrong
   command explains itself
-- *Upstream servers* — add, reorder and disable job servers. The order is the
-  priority
+- *Upstream servers* — link one with a code from its own UI, or fill a row in
+  by hand; reorder and disable them here too. The order is the priority
 
 **Generate** runs a workflow by hand: a form on one side, the run history on the
 other. Handy for checking a workflow does what you think before a job server
@@ -238,6 +238,17 @@ authenticated with `Authorization: Bearer <secret>`:
 | `POST /jobs/:id/result`    | the produced file, as the raw request body                   |
 | `POST /jobs/:id/complete`  | mark done                                                    |
 | `POST /jobs/:id/fail`      | mark failed, with `{ reason }`                               |
+
+A server may also implement one endpoint outside that block:
+
+| Endpoint                        | Purpose                                                   |
+| ------------------------------- | --------------------------------------------------------- |
+| `POST /api/internal/hosts/link` | trade `{ code }` for `{ hostId, hostSecret, hostName }`    |
+
+That is what *Link* on the Settings page calls. It is unauthenticated because
+the code is the credential: the server issues it, it works once, and it expires.
+A server without it is used the same way as before — fill the host id and secret
+in by hand.
 
 A claimed job looks like:
 

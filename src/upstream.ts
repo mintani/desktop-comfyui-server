@@ -14,6 +14,11 @@
  * - `POST /jobs/:jobId/result`        — upload the produced file as the raw body
  * - `POST /jobs/:jobId/complete`      — mark done
  * - `POST /jobs/:jobId/fail`          — mark failed with `{ reason }`
+ *
+ * Linking adds one more, outside the per-host block and unauthenticated
+ * because the code it takes is itself the credential:
+ *
+ * - `POST /api/internal/hosts/link`     — trade a one-time code for `{ hostId, hostSecret }`
  */
 
 import type { Settings, UpstreamConfig } from "./settings";
@@ -45,6 +50,42 @@ function toServer(config: UpstreamConfig): UpstreamServer {
     hostId: config.hostId,
     secret: config.secret,
   };
+}
+
+export type LinkedHost = {
+  hostId: string;
+  hostSecret: string;
+  /** What the server calls this host, so the UI can confirm what was linked. */
+  hostName?: string;
+};
+
+/**
+ * Trade a one-time code, issued by the job server's own UI, for this machine's
+ * credentials.
+ *
+ * This is the alternative to carrying a host id and a secret across by hand.
+ * The code is short-lived and spent on use, so it is safe to read off a screen
+ * in a way the secret it buys is not — which is why the secret is fetched here
+ * rather than shown to whoever is registering the machine.
+ */
+export async function claimLinkCode(url: string, code: string): Promise<LinkedHost> {
+  const res = await fetch(`${url}/api/internal/hosts/link`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+    signal: AbortSignal.timeout(15_000),
+  });
+
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `the server refused the code: HTTP ${res.status}`);
+  }
+
+  const linked = (await res.json()) as Partial<LinkedHost>;
+  if (!linked.hostId || !linked.hostSecret) {
+    throw new Error("the server accepted the code but sent no credentials");
+  }
+  return { hostId: linked.hostId, hostSecret: linked.hostSecret, hostName: linked.hostName };
 }
 
 function authHeaders(server: UpstreamServer): Record<string, string> {

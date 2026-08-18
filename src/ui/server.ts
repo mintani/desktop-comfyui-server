@@ -13,7 +13,14 @@ import {
   startJob,
 } from "../jobs";
 import { latestProgress } from "../progress";
-import { RUN_MODES, loadSettings, newUpstreamId, publicUpstreams, saveSettings } from "../settings";
+import {
+  RUN_MODES,
+  hostFromUrl,
+  loadSettings,
+  newUpstreamId,
+  publicUpstreams,
+  saveSettings,
+} from "../settings";
 import { latestStatus, refreshStatus } from "../status";
 import {
   activeWorkflowName,
@@ -25,7 +32,7 @@ import {
   saveWorkflowFile,
   setActiveWorkflow,
 } from "../workflow";
-import { testUpstream } from "../upstream";
+import { claimLinkCode, testUpstream } from "../upstream";
 import { authorise } from "./guard";
 import index from "./index.html";
 import type { AcceptSchedule, RunMode, UpstreamConfig } from "../settings";
@@ -189,6 +196,62 @@ async function handleUpstreamTest(req: Request): Promise<Response> {
       { comfyStatus, queueRunning, queuePending },
     );
     return Response.json(result);
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/**
+ * Link this machine to a job server with a one-time code issued by that
+ * server's own UI.
+ *
+ * The exchange happens here and not in the page for two reasons: the browser
+ * has no CORS grant from a job server it has never spoken to, and the secret
+ * that comes back has no business passing through the UI at all.
+ */
+async function handleLink(req: Request): Promise<Response> {
+  try {
+    const body = (await req.json()) as { url?: string; code?: string };
+    const url = (body.url ?? "").trim().replace(/\/$/, "");
+    const code = (body.code ?? "").trim();
+
+    if (!url) return fail("a server URL is required");
+    if (!/^https?:\/\//i.test(url))
+      return fail("the server URL must start with http:// or https://");
+    if (!code) return fail("a link code is required");
+
+    const linked = await claimLinkCode(url, code);
+
+    // One row per server URL. Linking the same server again replaces the
+    // credentials rather than leaving a second row claiming beside the first.
+    const settings = await loadSettings();
+    const known = settings.upstreams.some((server) => server.url === url);
+    const upstreams = known
+      ? settings.upstreams.map((server) =>
+          server.url === url
+            ? { ...server, hostId: linked.hostId, secret: linked.hostSecret }
+            : server,
+        )
+      : [
+          ...settings.upstreams,
+          {
+            id: newUpstreamId(),
+            name: hostFromUrl(url),
+            url,
+            hostId: linked.hostId,
+            secret: linked.hostSecret,
+            enabled: true,
+          },
+        ];
+
+    const saved = await saveSettings({ upstreams });
+    await applyUpstreamChange();
+
+    return Response.json({
+      upstreams: publicUpstreams(saved),
+      hostName: linked.hostName ?? null,
+      replaced: known,
+    });
   } catch (err) {
     return fail(err);
   }
@@ -503,6 +566,7 @@ export function startUi() {
 
       "/api/upstreams": { POST: guarded(handleUpstreamsSave) },
       "/api/upstreams/test": { POST: guarded(handleUpstreamTest) },
+      "/api/link": { POST: guarded(handleLink) },
 
       "/api/settings": { POST: guarded(handleSettingsSave) },
       "/api/mode": { POST: guarded(handleMode) },

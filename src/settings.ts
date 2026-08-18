@@ -140,7 +140,8 @@ function upstreamsFromEnv(): UpstreamConfig[] {
   return servers;
 }
 
-function hostFromUrl(url: string): string {
+/** The label a server gets when nobody named it: what its URL calls itself. */
+export function hostFromUrl(url: string): string {
   try {
     return new URL(url).host;
   } catch {

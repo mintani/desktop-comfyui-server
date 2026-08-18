@@ -263,6 +263,27 @@ const STRINGS = {
     en: "Asked for work from the top down. The first server with something queued gets this machine, so the order is the priority.",
     ja: "上から順に問い合わせます。仕事を持っていた最初のサーバーがこのマシンを使うので、並び順がそのまま優先順位です。",
   },
+  "servers.link": { en: "Link", ja: "リンク" },
+  "servers.linkHelp": {
+    en: "Have a job server issue a link code, then paste it here with that server's URL. The code carries the credentials across, so there is nothing to copy by hand. Linking a server already in the list replaces its credentials.",
+    ja: "ジョブサーバー側でリンクコードを発行し、そのサーバーの URL と一緒に貼り付けてください。認証情報はコードが運ぶので、手で写すものはありません。すでに一覧にあるサーバーをリンクすると、その認証情報を置き換えます。",
+  },
+  "servers.linkUrl": { en: "Server URL", ja: "サーバー URL" },
+  "servers.linkCode": { en: "Link code", ja: "リンクコード" },
+  "servers.linkNeeds": {
+    en: "a URL and a code are both needed",
+    ja: "URL とコードの両方が必要です",
+  },
+  "servers.linking": { en: "linking…", ja: "リンク中…" },
+  "servers.linked": {
+    en: "linked — the agent picked it up",
+    ja: "リンクしました。エージェントに反映済みです",
+  },
+  "servers.linkedAs": {
+    en: "linked as {name} — the agent picked it up",
+    ja: "{name} としてリンクしました。エージェントに反映済みです",
+  },
+  "servers.linkFailed": { en: "linking failed", ja: "リンクできませんでした" },
   "servers.empty": {
     en: "No upstream servers. This machine runs whatever you queue here and nothing else.",
     ja: "上流サーバーはありません。このマシンはここで入れた分だけを実行します。",
