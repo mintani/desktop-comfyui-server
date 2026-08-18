@@ -102,6 +102,14 @@ type State = {
     pausedUntil: number | null;
     schedule: { enabled: boolean; from: string; to: string };
   };
+  /** How far the run in flight has got, or null when nothing is reporting. */
+  progress: {
+    promptId: string;
+    value: number;
+    max: number;
+    node: string | null;
+    at: number;
+  } | null;
   desktop: { autostart: boolean; closeAction: "tray" | "quit" };
   jobs: JobRecord[];
 };
@@ -180,6 +188,11 @@ function formatDuration(ms: number): string {
 
 function formatTime(ms: number): string {
   return new Date(ms).toLocaleTimeString(locale());
+}
+
+/** Whole percent, clamped — a step past the max would otherwise overflow the bar. */
+function progressPercent(progress: { value: number; max: number }): number {
+  return Math.min(100, Math.max(0, Math.round((progress.value / progress.max) * 100)));
 }
 
 /** Whole minutes still to go. Never zero: seconds left is still time left. */
@@ -333,6 +346,10 @@ function renderVitals(state: State): void {
       : chip(t("vitals.agent"), `${pad(healthy)}/${pad(total)}`, agentTone),
     chip(t("vitals.work"), work.label, work.tone),
   ];
+
+  if (state.progress && state.progress.max > 0) {
+    chips.push(chip(t("vitals.progress"), `${progressPercent(state.progress)}%`, "run"));
+  }
 
   if (comfyProcess.managed) {
     chips.push(chip(t("vitals.process"), `pid ${comfyProcess.pid ?? "?"}`, "run"));
@@ -643,7 +660,25 @@ function jobError(job: JobRecord): string {
   return job.error ? `<p class="error">${esc(job.error)}</p>` : "";
 }
 
-function jobEntry(job: JobRecord, withDelete: boolean): string {
+/**
+ * The bar under a running row, and nothing at all otherwise. Matched by prompt
+ * id: ComfyUI reports on the prompt it is executing, which is only this job when
+ * the two ids agree — anything else on that queue is not ours to draw.
+ */
+function progressBar(job: JobRecord, progress: State["progress"]): string {
+  if (job.state !== "running" || !progress || progress.max <= 0) return "";
+  if (!progress.promptId || progress.promptId !== job.promptId) return "";
+
+  const percent = progressPercent(progress);
+  return `<div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}">
+      <span style="width: ${percent}%"></span>
+    </div>
+    <p class="meta">${t("jobs.progress", { percent, value: progress.value, max: progress.max })}${
+      progress.node ? ` · ${t("jobs.node", { node: esc(progress.node) })}` : ""
+    }</p>`;
+}
+
+function jobEntry(job: JobRecord, withDelete: boolean, progress: State["progress"]): string {
   const tone = job.state === "running" ? "run" : job.state === "succeeded" ? "ok" : "bad";
   const origin =
     job.source === "upstream"
@@ -668,6 +703,7 @@ function jobEntry(job: JobRecord, withDelete: boolean): string {
     <p class="meta">${formatTime(job.startedAt)} · ${timing}${origin}${
       job.promptId ? ` · ${t("jobs.prompt", { id: esc(job.promptId.slice(0, 8)) })}` : ""
     }</p>
+    ${progressBar(job, progress)}
     ${jobError(job)}
     ${job.outputs?.length ? renderOutputs(job.outputs) : ""}
   </div>`;
@@ -678,7 +714,7 @@ function renderJobs(state: State): void {
     renderIfChanged(nodes.jobs, "jobs", `<p class="empty">${t("jobs.empty")}</p>`);
     return;
   }
-  const html = state.jobs.map((job) => jobEntry(job, true)).join("");
+  const html = state.jobs.map((job) => jobEntry(job, true, state.progress)).join("");
   renderIfChanged(nodes.jobs, "jobs", `<div class="ledger">${html}</div>`);
 }
 
