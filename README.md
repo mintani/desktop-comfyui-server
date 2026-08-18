@@ -210,6 +210,11 @@ also polls for queued jobs, runs them through the active workflow and uploads
 the result — which is the point of the tray: the machine keeps serving with
 nothing on screen.
 
+Each row has a *Test* button. It sends one heartbeat there and then, so a wrong
+secret answers `HTTP 401` immediately instead of looking like an unreachable host
+until the next beat. It tests what is on screen, so a secret you have typed but
+not saved is the one tried; leaving the box blank tests the stored one.
+
 Several can be served at once. They are asked in the order the list puts them,
 so the top of the list is the priority: a server with work queued keeps this
 machine until it runs dry, and only then does the next one get a turn.

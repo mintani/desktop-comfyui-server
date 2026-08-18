@@ -24,6 +24,7 @@ import {
   saveWorkflowFile,
   setActiveWorkflow,
 } from "../workflow";
+import { testUpstream } from "../upstream";
 import { authorise } from "./guard";
 import index from "./index.html";
 import type { AcceptSchedule, RunMode, UpstreamConfig } from "../settings";
@@ -151,6 +152,41 @@ async function handleUpstreamsSave(req: Request): Promise<Response> {
     const saved = await saveSettings({ upstreams });
     await applyUpstreamChange();
     return Response.json({ upstreams: publicUpstreams(saved) });
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/**
+ * One heartbeat to a single server, sent now, so a wrong secret says so instead
+ * of looking like an unreachable host until the next scheduled beat.
+ *
+ * The row is taken as it stands on screen: a secret typed but not yet saved is
+ * what gets tested, and a blank one falls back to the stored value — the same
+ * rule the save path uses, so testing and saving cannot disagree about which
+ * secret they mean.
+ */
+async function handleUpstreamTest(req: Request): Promise<Response> {
+  try {
+    const input = (await req.json()) as UpstreamInput;
+    const settings = await loadSettings();
+    const stored = input.id
+      ? settings.upstreams.find((server) => server.id === input.id)
+      : undefined;
+
+    const url = (input.url ?? stored?.url ?? "").trim().replace(/\/$/, "");
+    if (!url) return fail("a URL is needed");
+    const hostId = (input.hostId ?? stored?.hostId ?? "").trim();
+    if (!hostId) return fail("a host id is needed");
+    const secret = (input.secret ?? "").trim() || stored?.secret || "";
+    if (!secret) return fail("a secret is needed");
+
+    const { comfyStatus, queueRunning, queuePending } = latestStatus();
+    const result = await testUpstream(
+      { name: url, url, hostId, secret },
+      { comfyStatus, queueRunning, queuePending },
+    );
+    return Response.json(result);
   } catch (err) {
     return fail(err);
   }
@@ -464,6 +500,7 @@ export function startUi() {
       "/api/workflows/delete": { POST: guarded(handleWorkflowDelete) },
 
       "/api/upstreams": { POST: guarded(handleUpstreamsSave) },
+      "/api/upstreams/test": { POST: guarded(handleUpstreamTest) },
 
       "/api/settings": { POST: guarded(handleSettingsSave) },
       "/api/mode": { POST: guarded(handleMode) },

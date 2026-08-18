@@ -81,6 +81,60 @@ export async function sendHeartbeat(
   }
 }
 
+export type UpstreamTest = {
+  ok: boolean;
+  /** Round trip in milliseconds, however it ended. */
+  ms: number;
+  /** Jobs waiting for this host, when the server said. */
+  pendingJobs?: number;
+  /** Why it failed, as close to the server's own words as there are any. */
+  error?: string;
+};
+
+/** Enough of a rejection to tell a wrong secret from a wrong address. */
+const REASON_LIMIT = 120;
+
+/**
+ * One heartbeat, sent now, answering with why it failed rather than logging it.
+ *
+ * A separate call from {@link sendHeartbeat} on purpose: that one swallows
+ * failures because the poll loop must carry on regardless, and someone who has
+ * just typed a secret in wants the opposite — the status code, in the row.
+ */
+export async function testUpstream(
+  server: UpstreamServer,
+  status: ComfyStatusResult,
+): Promise<UpstreamTest> {
+  const started = Date.now();
+
+  try {
+    const res = await fetch(`${server.url}/api/internal/hosts/${server.hostId}/heartbeat`, {
+      method: "POST",
+      headers: authHeaders(server),
+      body: JSON.stringify(status),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const ms = Date.now() - started;
+
+    if (!res.ok) {
+      const reason = (await res.text().catch(() => "")).trim().slice(0, REASON_LIMIT);
+      return {
+        ok: false,
+        ms,
+        error: reason ? `HTTP ${res.status} ${reason}` : `HTTP ${res.status}`,
+      };
+    }
+    const ack = (await res.json()) as HeartbeatAck;
+    return { ok: true, ms, pendingJobs: ack.pendingJobs };
+  } catch (err) {
+    return {
+      ok: false,
+      ms: Date.now() - started,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 export async function claimJob(server: UpstreamServer): Promise<ClaimedJob | null> {
   try {
     const res = await fetch(`${server.url}/api/internal/hosts/${server.hostId}/jobs/claim`, {
