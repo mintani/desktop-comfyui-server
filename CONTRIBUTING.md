@@ -13,11 +13,19 @@ English.
 3. Open a pull request into `dev` and name the issue in it — `Closes #12`.
 4. When `dev` is ready to ship, merge it into `main`. That is a release.
 
-## Commits
+## Titles
 
+Issues, commits and pull requests are all titled with
 [Conventional Commits](https://www.conventionalcommits.org), with a scope where
 one helps: `feat(tray): keep running after the window closes`. One line, and
 within 72 characters — GitHub cuts off longer subjects.
+
+An issue is titled for the change it asks for, a commit for the change it makes,
+and a pull request for what its branch does as a whole. Those three often read
+the same, which is the point: an issue and the work that answers it are easy to
+line up. Reasoning goes in the body, never in the title.
+
+## Checks
 
 `lefthook` runs oxlint and oxfmt over staged files on commit. CI repeats them
 along with `tsc --noEmit`, and compiles the Rust shell with clippy.
