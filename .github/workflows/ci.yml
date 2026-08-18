@@ -1,10 +1,11 @@
 name: CI
 
+# main only receives releases; the work happens on dev and the branches off it.
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
 
 # Cancel an in-flight run when the same branch is pushed again.
 concurrency:
