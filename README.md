@@ -106,6 +106,26 @@ answering claims nothing from a job server either, whatever its state says.
 
 The same three are in the tray, so it can be changed with the window closed.
 
+### When it accepts
+
+*Accepting* does not have to mean right now. Under *Accepting jobs* on the
+Settings page:
+
+- **Hold off for** 15, 30 or 60 minutes. The machine stops taking jobs and
+  starts again on its own, which is what you want when the GPU is yours for the
+  next half hour and remembering to switch back is the hard part.
+- **Every day, only between two times.** 02:00 to 08:00 lends the GPU out
+  overnight. An end before the start crosses midnight, so that window is tonight
+  until tomorrow morning rather than an error.
+
+Both only hold jobs back. ComfyUI stays up, runs you start here still go, and
+job servers still see the machine — they simply get nothing out of it until the
+hold is over. The header says which of the two is holding it and the status bar
+says how much is left.
+
+A hold is stored with its end time rather than counted down in memory, so
+restarting the app in the middle of one does not start claiming early.
+
 ## The tray
 
 Closing the window does not stop anything. The app stays in the tray with:

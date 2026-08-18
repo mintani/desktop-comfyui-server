@@ -96,6 +96,12 @@ type State = {
   upstreams: UpstreamView[];
   settings: { comfyDir: string; comfyCommand: string };
   mode: RunMode;
+  accepting: {
+    accepting: boolean;
+    blockedBy: "mode" | "paused" | "schedule" | null;
+    pausedUntil: number | null;
+    schedule: { enabled: boolean; from: string; to: string };
+  };
   desktop: { autostart: boolean; closeAction: "tray" | "quit" };
   jobs: JobRecord[];
 };
@@ -141,7 +147,14 @@ const nodes = {
   modePanel: el("mode-panel"),
   modeDot: el("mode-dot"),
   modeLabel: el("mode-label"),
+  modeGate: el("mode-gate"),
   modeNote: el("mode-note"),
+  acceptPause: el("accept-pause"),
+  acceptPauseState: el("accept-pause-state"),
+  acceptEnabled: el<HTMLInputElement>("accept-enabled"),
+  acceptFrom: el<HTMLInputElement>("accept-from"),
+  acceptTo: el<HTMLInputElement>("accept-to"),
+  acceptNote: el("accept-note"),
   desktopAutostart: el<HTMLInputElement>("desktop-autostart"),
   desktopNote: el("desktop-note"),
 };
@@ -167,6 +180,11 @@ function formatDuration(ms: number): string {
 
 function formatTime(ms: number): string {
   return new Date(ms).toLocaleTimeString(locale());
+}
+
+/** Whole minutes still to go. Never zero: seconds left is still time left. */
+function minutesLeft(until: number): number {
+  return Math.max(1, Math.ceil((until - Date.now()) / 60_000));
 }
 
 /**
@@ -291,6 +309,16 @@ function renderVitals(state: State): void {
   const healthy = agent.upstreams.filter((server) => server.heartbeat?.ok).length;
   const agentTone = healthy === total ? "ok" : healthy > 0 ? "warn" : "bad";
 
+  // What is holding jobs back beats the mode here: "accepting" with a pause
+  // running is not what anyone glancing at the bar wants to be told.
+  const gate = state.accepting;
+  const work =
+    gate.blockedBy === "paused" && gate.pausedUntil !== null
+      ? { label: t("accept.paused", { minutes: minutesLeft(gate.pausedUntil) }), tone: "idle" }
+      : gate.blockedBy === "schedule"
+        ? { label: t("accept.outside"), tone: "idle" }
+        : { label: modeLabel(state.mode), tone: MODE_TONE[state.mode] };
+
   const chips = [
     chip(t("vitals.comfy"), esc(comfyStatusLabel(comfy.comfyStatus)), tone),
     chip(t("vitals.running"), pad(comfy.queueRunning)),
@@ -298,7 +326,7 @@ function renderVitals(state: State): void {
     total === 0
       ? chip(t("vitals.agent"), t("vitals.standalone"))
       : chip(t("vitals.agent"), `${pad(healthy)}/${pad(total)}`, agentTone),
-    chip(t("vitals.work"), modeLabel(state.mode), MODE_TONE[state.mode]),
+    chip(t("vitals.work"), work.label, work.tone),
   ];
 
   if (comfyProcess.managed) {
@@ -658,6 +686,59 @@ function syncMode(state: State): void {
   for (const option of document.querySelectorAll<HTMLElement>("[data-mode]")) {
     option.setAttribute("aria-pressed", String(option.dataset["mode"] === state.mode));
   }
+
+  const gate = state.accepting;
+  nodes.modeGate.textContent =
+    gate.blockedBy === "paused" && gate.pausedUntil !== null
+      ? t("accept.gatePaused", { minutes: minutesLeft(gate.pausedUntil) })
+      : gate.blockedBy === "schedule"
+        ? t("accept.gateSchedule", { from: gate.schedule.from, to: gate.schedule.to })
+        : "";
+}
+
+// ---------------------------------------------------------------------------
+// Accepting — when the mode is allowed to claim
+// ---------------------------------------------------------------------------
+
+/** Held while a control is in flight, so a poll cannot flip it back. */
+let acceptBusy = false;
+
+function syncAccepting(state: State): void {
+  const { pausedUntil, schedule } = state.accepting;
+
+  nodes.acceptPauseState.textContent =
+    pausedUntil === null
+      ? t("accept.notPaused")
+      : t("accept.pausedUntil", {
+          time: formatTime(pausedUntil),
+          minutes: minutesLeft(pausedUntil),
+        });
+
+  // Nothing to resume from when nothing is on hold.
+  for (const button of nodes.acceptPause.querySelectorAll<HTMLButtonElement>('[data-pause="0"]')) {
+    button.disabled = pausedUntil === null;
+  }
+
+  if (acceptBusy) return;
+  nodes.acceptEnabled.checked = schedule.enabled;
+  // A time is saved as soon as it changes, so the only field worth leaving
+  // alone is the one being typed into.
+  if (document.activeElement !== nodes.acceptFrom) nodes.acceptFrom.value = schedule.from;
+  if (document.activeElement !== nodes.acceptTo) nodes.acceptTo.value = schedule.to;
+}
+
+/** Send one change, then let the next poll confirm it. */
+async function saveAccepting(path: string, body: unknown): Promise<void> {
+  acceptBusy = true;
+  const result = await post(path, body);
+  acceptBusy = false;
+
+  setNote(
+    nodes.acceptNote,
+    result.ok ? t("accept.saved") : (result.error ?? t("accept.saveFailed")),
+    !result.ok,
+  );
+  void poll();
 }
 
 // ---------------------------------------------------------------------------
@@ -760,6 +841,7 @@ function render(state: State): void {
   renderJobs(state);
   syncSettings(state);
   syncMode(state);
+  syncAccepting(state);
   syncDesktop(state);
   syncForm(state);
 }
@@ -858,7 +940,13 @@ onLangChange(() => {
 
   // Notes report something that has already happened, so they are cleared
   // rather than translated after the fact.
-  for (const note of [nodes.note, nodes.uploadNote, nodes.settingsNote, nodes.serversNote]) {
+  for (const note of [
+    nodes.note,
+    nodes.uploadNote,
+    nodes.settingsNote,
+    nodes.serversNote,
+    nodes.acceptNote,
+  ]) {
     setNote(note, "");
   }
 
@@ -1142,6 +1230,29 @@ nodes.desktopPanel.addEventListener("click", (event) => {
   ];
   if (choice) void saveDesktop("/api/desktop", { closeAction: choice });
 });
+
+nodes.acceptPause.addEventListener("click", (event) => {
+  const minutes = (event.target as HTMLElement).closest<HTMLElement>("[data-pause]")?.dataset[
+    "pause"
+  ];
+  if (minutes === undefined) return;
+  void saveAccepting("/api/accept/pause", { minutes: Number(minutes) });
+});
+
+nodes.acceptEnabled.addEventListener("change", () => {
+  void saveAccepting("/api/accept/schedule", { enabled: nodes.acceptEnabled.checked });
+});
+
+// Both go together: a window is the pair, and sending one of them alone would
+// save a half-edited window on the way to the other field.
+for (const input of [nodes.acceptFrom, nodes.acceptTo]) {
+  input.addEventListener("change", () => {
+    void saveAccepting("/api/accept/schedule", {
+      from: nodes.acceptFrom.value,
+      to: nodes.acceptTo.value,
+    });
+  });
+}
 
 // Ticking elapsed time for running jobs, kept out of the render pass so it
 // never rewrites the job list.

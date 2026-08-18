@@ -103,6 +103,9 @@
                 <span class="muted" data-i18n="mode.pausedNote"></span>
               </span>
             </button>
+            <!-- What is holding jobs back while the mode above says they are
+                 welcome: a pause running out, or the wrong time of day. -->
+            <p class="muted" id="mode-gate"></p>
             <p class="muted" id="mode-note"></p>
           </div>
         </div>
@@ -410,6 +413,50 @@
               </button>
               <p class="muted" id="servers-note"></p>
             </div>
+          </section>
+
+          <!-- The mode in the header says whether this machine takes work at
+               all. This says when, so nobody has to be sitting here to switch
+               it back. Both only ever hold jobs back — a run started here, and
+               ComfyUI itself, are untouched. -->
+          <section class="panel">
+            <div class="panel-head"><h2 data-i18n="accept.title">Accepting jobs</h2></div>
+            <p class="muted" data-i18n="accept.help"></p>
+
+            <p class="popover-label" data-i18n="accept.pauseFor">Hold off for</p>
+            <div class="actions" id="accept-pause">
+              <button type="button" class="ghost" data-pause="15" data-i18n="accept.pause15">
+                15 min
+              </button>
+              <button type="button" class="ghost" data-pause="30" data-i18n="accept.pause30">
+                30 min
+              </button>
+              <button type="button" class="ghost" data-pause="60" data-i18n="accept.pause60">
+                1 hour
+              </button>
+              <button type="button" class="ghost" data-pause="0" data-i18n="accept.resume">
+                Resume now
+              </button>
+            </div>
+            <p class="muted" id="accept-pause-state"></p>
+
+            <p class="popover-label" data-i18n="accept.schedule">Every day</p>
+            <label class="check">
+              <input type="checkbox" id="accept-enabled" />
+              <span data-i18n="accept.scheduleOn">Only accept between these times</span>
+            </label>
+            <div class="row">
+              <label class="field">
+                <span data-i18n="accept.from">From</span>
+                <input type="time" id="accept-from" />
+              </label>
+              <label class="field">
+                <span data-i18n="accept.to">To</span>
+                <input type="time" id="accept-to" />
+              </label>
+            </div>
+            <p class="muted" data-i18n="accept.overnight"></p>
+            <p class="muted" id="accept-note"></p>
           </section>
         </section>
       </main>

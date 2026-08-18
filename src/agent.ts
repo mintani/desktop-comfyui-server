@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { acceptState } from "./accepting";
 import { uploadImage } from "./comfy";
 import {
   AUTO_UPDATE,
@@ -177,10 +178,10 @@ async function runPoll() {
       }
     }
 
-    // Only the first mode claims. Heartbeats carry on either way, so the
-    // upstream still sees this host as alive — its queue simply is not drained
-    // from here.
-    if ((await loadSettings()).mode !== "accepting") {
+    // Only the first mode claims, and a pause or a daily window can withhold
+    // it further. Heartbeats carry on through all of it, so the upstream still
+    // sees this host as alive — its queue simply is not drained from here.
+    if (!acceptState(await loadSettings()).accepting) {
       await idle(POLL_INTERVAL_MS);
       continue;
     }
