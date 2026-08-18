@@ -240,7 +240,29 @@ export async function reloadAgent(servers: UpstreamServer[]): Promise<void> {
   startAgent(servers);
 }
 
-/** Called after the Servers page saves, so a change takes effect at once. */
+/**
+ * Called after the Servers page saves, so a change takes effect at once.
+ *
+ * A running loop is handed the new list instead of being restarted. Restarting
+ * means waiting for the loop to leave the job it is in, which is up to
+ * `JOB_TIMEOUT_MS` of a page that looks hung — and nothing needs the wait:
+ * only starting a second loop alongside the first would double-claim, and
+ * swapping a list in place never does that. The job in flight finishes against
+ * the server it was claimed from, which it holds a reference to.
+ */
 export async function applyUpstreamChange(): Promise<void> {
-  await reloadAgent(activeUpstreams(await loadSettings()));
+  const servers = activeUpstreams(await loadSettings());
+
+  // Nothing is running, so there is no loop to hand it to.
+  if (!running) {
+    await reloadAgent(servers);
+    return;
+  }
+
+  upstreams = servers;
+  heartbeats.clear();
+
+  // Nothing left to claim from. Heartbeats stop now; the job in flight still
+  // reports back, because it carries its own server.
+  if (servers.length === 0) stopAgent();
 }
