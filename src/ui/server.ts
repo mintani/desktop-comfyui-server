@@ -12,6 +12,7 @@ import {
   removeJob,
   startJob,
 } from "../jobs";
+import { latestProgress } from "../progress";
 import { RUN_MODES, loadSettings, newUpstreamId, publicUpstreams, saveSettings } from "../settings";
 import { latestStatus, refreshStatus } from "../status";
 import {
@@ -52,6 +53,7 @@ async function handleState(): Promise<Response> {
     settings: { comfyDir: settings.comfyDir, comfyCommand: settings.comfyCommand },
     mode: settings.mode,
     accepting: acceptState(settings),
+    progress: latestProgress(),
     desktop: settings.desktop,
     jobs: listJobs(),
   });

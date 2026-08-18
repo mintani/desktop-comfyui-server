@@ -129,6 +129,7 @@ const STRINGS = {
   "vitals.process": { en: "process", ja: "プロセス" },
   "vitals.access": { en: "access", ja: "アクセス" },
   "vitals.work": { en: "work", ja: "受付" },
+  "vitals.progress": { en: "progress", ja: "進捗" },
   "vitals.tokenNeeded": {
     en: "open this page as ?token=<UI_TOKEN>",
     ja: "?token=<UI_TOKEN> を付けて開いてください",
@@ -179,6 +180,11 @@ const STRINGS = {
   "jobs.ui": { en: "UI", ja: "UI" },
   "jobs.upstream": { en: "upstream", ja: "上流" },
   "jobs.prompt": { en: "prompt {id}", ja: "prompt {id}" },
+  "jobs.progress": {
+    en: "{percent}% · step {value}/{max}",
+    ja: "{percent}% · {value}/{max} ステップ",
+  },
+  "jobs.node": { en: "node {node}", ja: "ノード {node}" },
   "jobs.interrupted": { en: "interrupted by a restart", ja: "再起動で中断されました" },
   "jobs.delete": { en: "Delete", ja: "削除" },
 

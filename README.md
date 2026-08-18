@@ -78,6 +78,11 @@ change something.
 other. Handy for checking a workflow does what you think before a job server
 starts sending work.
 
+A run in flight carries a bar — the steps ComfyUI has done out of the steps it
+expects, and the node it is on — so a slow workflow can be told from a stuck one.
+Jobs claimed from a job server land in the same history, so they get the same
+bar, and the status bar carries the percentage on either page.
+
 The header switches the theme and the language, and the button beside them opens
 the app's own settings — the same switches the tray menu carries.
 
