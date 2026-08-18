@@ -1,3 +1,4 @@
+import { MAX_PAUSE_MINUTES, acceptState, isTimeOfDay, pauseUntil } from "../accepting";
 import { agentSnapshot, applyUpstreamChange } from "../agent";
 import { interrupt, uploadImage, viewUrl } from "../comfy";
 import { comfyProcessState, startComfy, stopComfy } from "../comfy-process";
@@ -25,7 +26,7 @@ import {
 } from "../workflow";
 import { authorise } from "./guard";
 import index from "./index.html";
-import type { RunMode, UpstreamConfig } from "../settings";
+import type { AcceptSchedule, RunMode, UpstreamConfig } from "../settings";
 import type { RunParams } from "../types";
 
 function message(err: unknown): string {
@@ -49,6 +50,7 @@ async function handleState(): Promise<Response> {
     upstreams: publicUpstreams(settings),
     settings: { comfyDir: settings.comfyDir, comfyCommand: settings.comfyCommand },
     mode: settings.mode,
+    accepting: acceptState(settings),
     desktop: settings.desktop,
     jobs: listJobs(),
   });
@@ -202,6 +204,57 @@ async function handleMode(req: Request): Promise<Response> {
       await refreshStatus();
     }
     return Response.json({ mode: saved.mode });
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/**
+ * Hold off claiming for a while, then let it resume on its own. `0` minutes
+ * (or `null`) clears a pause that is still running.
+ *
+ * Deliberately not folded into `/api/mode`: the mode is what someone decided
+ * this machine is for, and a pause is a detour from it that ends by itself.
+ */
+async function handlePause(req: Request): Promise<Response> {
+  try {
+    const { minutes } = (await req.json()) as { minutes?: unknown };
+    const value = minutes === null || minutes === undefined ? 0 : minutes;
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      return fail("minutes must be a number");
+    }
+    if (value < 0 || value > MAX_PAUSE_MINUTES) {
+      return fail(`minutes must be between 0 and ${MAX_PAUSE_MINUTES}`);
+    }
+
+    const saved = await saveSettings({ pauseUntil: pauseUntil(value) });
+    return Response.json({ accepting: acceptState(saved) });
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/**
+ * The daily window. Saved field by field like the desktop switches, so turning
+ * the window on does not need the times sent again, and fixing a time does not
+ * need the switch sent again.
+ */
+async function handleScheduleSave(req: Request): Promise<Response> {
+  try {
+    const body = (await req.json()) as Partial<AcceptSchedule>;
+    const current = (await loadSettings()).schedule;
+
+    if (body.enabled !== undefined && typeof body.enabled !== "boolean") {
+      return fail("enabled must be true or false");
+    }
+    const from = body.from ?? current.from;
+    const to = body.to ?? current.to;
+    if (!isTimeOfDay(from) || !isTimeOfDay(to)) return fail("from and to must be HH:MM");
+
+    const saved = await saveSettings({
+      schedule: { enabled: body.enabled ?? current.enabled, from, to },
+    });
+    return Response.json({ accepting: acceptState(saved) });
   } catch (err) {
     return fail(err);
   }
@@ -414,6 +467,8 @@ export function startUi() {
 
       "/api/settings": { POST: guarded(handleSettingsSave) },
       "/api/mode": { POST: guarded(handleMode) },
+      "/api/accept/pause": { POST: guarded(handlePause) },
+      "/api/accept/schedule": { POST: guarded(handleScheduleSave) },
       "/api/desktop": { POST: guarded(handleDesktopSave) },
       "/api/comfy/start": { POST: guarded(handleComfyStart) },
       "/api/comfy/stop": { POST: guarded(handleComfyStop) },

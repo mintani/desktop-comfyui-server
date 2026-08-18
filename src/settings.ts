@@ -10,6 +10,7 @@
  */
 
 import { readFile, writeFile } from "node:fs/promises";
+import { isTimeOfDay } from "./accepting";
 import { STATE_FILE } from "./config";
 
 export type UpstreamConfig = {
@@ -50,6 +51,20 @@ export type RunMode =
 
 export const RUN_MODES: RunMode[] = ["accepting", "local", "paused"];
 
+/**
+ * The daily window in which job servers get work out of this machine. Off on a
+ * fresh install: a machine that is running accepts, which is the behaviour
+ * everyone had before there was a window at all.
+ */
+export type AcceptSchedule = {
+  enabled: boolean;
+  /** Local `HH:MM`. An end before the start crosses midnight. */
+  from: string;
+  to: string;
+};
+
+const EMPTY_SCHEDULE: AcceptSchedule = { enabled: false, from: "02:00", to: "08:00" };
+
 export type Settings = {
   activeWorkflow: string | null;
   /** Where ComfyUI is checked out. Empty until someone fills it in. */
@@ -65,6 +80,14 @@ export type Settings = {
    * up quietly claiming jobs again is the surprising behaviour.
    */
   mode: RunMode;
+  /** When the mode above is allowed to claim. */
+  schedule: AcceptSchedule;
+  /**
+   * Claiming is off until this timestamp, `null` when it is not. A stored
+   * deadline rather than a countdown, so a restart inside the pause does not
+   * quietly start claiming again.
+   */
+  pauseUntil: number | null;
   desktop: DesktopSettings;
 };
 
@@ -74,6 +97,8 @@ const EMPTY: Settings = {
   comfyCommand: "",
   upstreams: [],
   mode: "accepting",
+  schedule: EMPTY_SCHEDULE,
+  pauseUntil: null,
   desktop: { autostart: false, closeAction: "tray" },
 };
 
@@ -132,6 +157,18 @@ function normaliseMode(value: Partial<Settings> & { accepting?: unknown }): RunM
   return "accepting";
 }
 
+function normaliseSchedule(raw: unknown): AcceptSchedule {
+  const value = (raw ?? {}) as Partial<AcceptSchedule>;
+  return {
+    enabled: value.enabled === true,
+    // A time the file cannot describe falls back to the default rather than
+    // failing the load: the window is off by default, so nothing is lent out
+    // on a value nobody typed.
+    from: isTimeOfDay(value.from) ? value.from : EMPTY_SCHEDULE.from,
+    to: isTimeOfDay(value.to) ? value.to : EMPTY_SCHEDULE.to,
+  };
+}
+
 function normaliseDesktop(raw: unknown): DesktopSettings {
   const value = (raw ?? {}) as Partial<DesktopSettings>;
   return {
@@ -152,6 +189,8 @@ function normalise(raw: unknown): Settings {
     // missing key falls back to the environment.
     upstreams: upstreams ?? upstreamsFromEnv(),
     mode: normaliseMode(value),
+    schedule: normaliseSchedule(value.schedule),
+    pauseUntil: typeof value.pauseUntil === "number" ? value.pauseUntil : null,
     desktop: normaliseDesktop(value.desktop),
   };
 }

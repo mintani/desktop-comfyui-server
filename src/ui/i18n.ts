@@ -63,6 +63,46 @@ const STRINGS = {
   },
   "mode.saveFailed": { en: "could not change it", ja: "変更できませんでした" },
 
+  // When jobs are accepted, on top of the mode -------------------------------
+  "accept.title": { en: "Accepting jobs", ja: "ジョブの受付" },
+  "accept.help": {
+    en: "When job servers get work out of this machine. Runs you start here, and ComfyUI itself, are not affected.",
+    ja: "ジョブサーバーからの仕事をいつ受けるかの設定です。ここから始める実行と ComfyUI 自体には影響しません。",
+  },
+  "accept.pauseFor": { en: "Hold off for", ja: "一時停止" },
+  "accept.pause15": { en: "15 min", ja: "15分" },
+  "accept.pause30": { en: "30 min", ja: "30分" },
+  "accept.pause60": { en: "1 hour", ja: "1時間" },
+  "accept.resume": { en: "Resume now", ja: "すぐ再開" },
+  "accept.pausedUntil": {
+    en: "On hold until {time}, {minutes} min left.",
+    ja: "{time} まで停止中です。あと {minutes} 分。",
+  },
+  "accept.notPaused": { en: "Not on hold.", ja: "一時停止していません。" },
+  "accept.schedule": { en: "Every day", ja: "毎日" },
+  "accept.scheduleOn": {
+    en: "Only accept between these times",
+    ja: "この時間帯だけ受け付ける",
+  },
+  "accept.from": { en: "From", ja: "開始" },
+  "accept.to": { en: "To", ja: "終了" },
+  "accept.overnight": {
+    en: "An end before the start runs overnight — 22:00 to 06:00 is tonight until tomorrow morning.",
+    ja: "終了が開始より前なら日をまたぎます。22:00〜06:00 は今夜から翌朝までです。",
+  },
+  "accept.saved": { en: "saved", ja: "保存しました" },
+  "accept.saveFailed": { en: "could not save it", ja: "保存できませんでした" },
+  "accept.paused": { en: "on hold {minutes}m", ja: "停止中 あと{minutes}分" },
+  "accept.outside": { en: "outside the window", ja: "時間帯外" },
+  "accept.gatePaused": {
+    en: "Jobs are on hold for another {minutes} min. Runs started here still go.",
+    ja: "あと {minutes} 分はジョブを受けません。ここからの実行は動きます。",
+  },
+  "accept.gateSchedule": {
+    en: "Outside {from}–{to}, so nothing is claimed. Runs started here still go.",
+    ja: "{from}〜{to} の外なのでジョブは受けません。ここからの実行は動きます。",
+  },
+
   // The desktop menu, mirrored by the tray -----------------------------------
   "desktop.title": { en: "Desktop app", ja: "デスクトップアプリ" },
   "desktop.autostart": { en: "Start when the computer starts", ja: "PC 起動時に起動する" },
