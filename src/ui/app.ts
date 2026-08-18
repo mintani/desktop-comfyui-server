@@ -229,7 +229,10 @@ function outputUrl(output: RunOutput): string {
   return `/api/output?${query}`;
 }
 
-async function post(path: string, body?: unknown): Promise<{ ok: boolean; error?: string }> {
+async function post<T = unknown>(
+  path: string,
+  body?: unknown,
+): Promise<{ ok: boolean; error?: string; data?: T }> {
   try {
     const res = await fetch(path, {
       method: "POST",
@@ -239,8 +242,10 @@ async function post(path: string, body?: unknown): Promise<{ ok: boolean; error?
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
-    const parsed = (await res.json().catch(() => ({}))) as { error?: string };
-    return res.ok ? { ok: true } : { ok: false, error: parsed.error ?? `HTTP ${res.status}` };
+    const parsed = (await res.json().catch(() => ({}))) as { error?: string } & T;
+    return res.ok
+      ? { ok: true, data: parsed }
+      : { ok: false, error: parsed.error ?? `HTTP ${res.status}` };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
@@ -444,7 +449,14 @@ function renderWorkflows(state: State): void {
 // Upstream servers — an editor, so polling must not overwrite what is typed
 // ---------------------------------------------------------------------------
 
-type ServerRow = UpstreamView & { secret: string };
+type UpstreamTest = { ok: boolean; ms: number; pendingJobs?: number; error?: string };
+
+/**
+ * A row as it stands on screen: the stored server, the secret box (blank means
+ * "keep the stored one"), and the last test of it. `testing` is held on the row
+ * rather than globally so testing one server leaves the others alone.
+ */
+type ServerRow = UpstreamView & { secret: string; testing?: boolean; test?: UpstreamTest };
 
 let serverRows: ServerRow[] | null = null;
 let serversDirty = false;
@@ -459,6 +471,23 @@ function heartbeatFor(state: State, row: ServerRow): string {
   return `<span class="state"><span class="dot ${beat.ok ? "ok" : "bad"}"></span>${
     beat.ok ? t("servers.up") : t("servers.down")
   }${waiting}</span>`;
+}
+
+/** The last test of this row, in its own words. Nothing until one is run. */
+function testResultFor(row: ServerRow): string {
+  if (row.testing) return `<p class="meta">${t("servers.testing")}</p>`;
+  if (!row.test) return "";
+
+  if (!row.test.ok) {
+    return `<p class="error">${t("servers.testFailed", {
+      error: esc(row.test.error ?? ""),
+    })}</p>`;
+  }
+  const queued =
+    row.test.pendingJobs === undefined
+      ? ""
+      : ` · ${t("servers.queued", { count: row.test.pendingJobs })}`;
+  return `<p class="meta">${t("servers.testOk", { ms: row.test.ms })}${queued}</p>`;
 }
 
 function renderServers(state: State): void {
@@ -477,6 +506,9 @@ function renderServers(state: State): void {
           <span class="mono muted">${pad(index + 1)}</span>
           ${heartbeatFor(state, row)}
           <span class="spacer"></span>
+          <button type="button" class="ghost" data-test-server="${index}">${t(
+            "servers.test",
+          )}</button>
           <button type="button" class="ghost" data-move="${index}" data-dir="-1" ${
             index === 0 ? "disabled" : ""
           } title="${t("servers.higher")}">↑</button>
@@ -515,9 +547,39 @@ function renderServers(state: State): void {
           <input type="checkbox" data-field="enabled" ${row.enabled ? "checked" : ""} />
           <span>${t("servers.enabled")}</span>
         </label>
+        ${testResultFor(row)}
       </div>`,
     )
     .join("")}</div>`;
+}
+
+/**
+ * Ask one server for a heartbeat now and keep the answer on its row. What is on
+ * screen is sent, so a secret typed a moment ago is what gets tried.
+ */
+async function testServer(index: number): Promise<void> {
+  const row = serverRows?.[index];
+  if (!row || !latestState) return;
+
+  row.testing = true;
+  row.test = undefined;
+  renderServers(latestState);
+
+  const result = await post<UpstreamTest>("/api/upstreams/test", {
+    id: row.id || undefined,
+    url: row.url,
+    hostId: row.hostId,
+    // Blank means the stored one, exactly as saving reads it.
+    secret: row.secret,
+  });
+
+  row.testing = false;
+  // A request the server refused outright — a row with no URL yet — is the same
+  // kind of answer as one it sent: it belongs on the row, not in the console.
+  row.test = result.ok
+    ? (result.data ?? { ok: true, ms: 0 })
+    : { ok: false, ms: 0, error: result.error ?? "" };
+  if (latestState) renderServers(latestState);
 }
 
 /** Copy what is on screen back into the model before any structural change. */
@@ -1087,6 +1149,13 @@ nodes.servers.addEventListener("click", (event) => {
       serversDirty = true;
       if (latestState) renderServers(latestState);
     }
+    return;
+  }
+
+  const test = target.closest<HTMLElement>("[data-test-server]");
+  if (test && serverRows) {
+    readServerInputs();
+    void testServer(Number(test.dataset["testServer"]));
     return;
   }
 
