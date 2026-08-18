@@ -1,16 +1,15 @@
 name: Release
 
-# Push a tag to get installers people can download:
-#
-#   git tag v0.1.0 && git push origin v0.1.0
-#
-# The release is created as a draft, so nothing becomes public until you say so.
-# Running this by hand from the Actions tab instead builds the same installers
-# and leaves them as workflow artifacts, which is the way to try a build without
-# announcing one.
+# Releases follow the version in package.json. Land a commit on main whose
+# version differs from the commit before it and this builds the installers and
+# opens a draft release for that version, so nothing becomes public until you
+# publish it. Running this by hand from the Actions tab instead builds the same
+# installers and leaves them as workflow artifacts, which is the way to try a
+# build without announcing one.
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+    paths: [package.json]
   workflow_dispatch:
 
 concurrency:
@@ -18,8 +17,56 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      bumped: ${{ steps.check.outputs.bumped }}
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v5
+        with:
+          # One commit back, to compare package.json against.
+          fetch-depth: 2
+
+      # package.json declares the release, but the installer filenames come from
+      # tauri.conf.json and the crate from Cargo.toml. Left unchecked, a bump in
+      # one of them ships v0.2.0 with 0.1.2 written on the installer.
+      - name: Read the version
+        id: check
+        shell: bash
+        run: |
+          version=$(jq -r .version package.json)
+          app=$(jq -r .version src-tauri/tauri.conf.json)
+          crate=$(grep -m1 '^version = ' src-tauri/Cargo.toml | cut -d'"' -f2)
+          if [ "$version" != "$app" ] || [ "$version" != "$crate" ]; then
+            echo "::error::versions differ: package.json $version, tauri.conf.json $app, Cargo.toml $crate"
+            exit 1
+          fi
+
+          previous=""
+          if git rev-parse -q --verify HEAD^ >/dev/null; then
+            previous=$(git show HEAD^:package.json | jq -r .version)
+          fi
+
+          bumped=false
+          if [ "${{ github.event_name }}" = push ] && [ "$version" != "$previous" ]; then
+            bumped=true
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "bumped=$bumped" >> "$GITHUB_OUTPUT"
+          echo "Version $version, was ${previous:-none}. Release: $bumped." >> "$GITHUB_STEP_SUMMARY"
+
   windows:
     name: Windows installer
+    needs: version
+    # A push that touches package.json without changing the version — a script,
+    # a dependency — is not a release.
+    if: needs.version.outputs.bumped == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     timeout-minutes: 60
 
@@ -56,7 +103,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          # Empty for a manual run: build the installers, create nothing.
+          tagName: ${{ needs.version.outputs.bumped == 'true' && format('v{0}', needs.version.outputs.version) || '' }}
           releaseName: Desktop ComfyUI Server __VERSION__
           releaseDraft: true
           prerelease: false

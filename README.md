@@ -50,7 +50,7 @@ is inside. What you can check instead:
 - Everything the app runs is in this repository. There is no separate download
   and no telemetry — it only talks to your ComfyUI and to job servers you add
   yourself.
-- The installers are built by GitHub Actions from the tagged commit, not
+- The installers are built by GitHub Actions from the released commit, not
   uploaded from anyone's machine. The build log for each release is public.
 - It contains exactly two programs: `desktop-comfyui-server.exe`, the window,
   and `comfyui-server.exe`, the server from `src/`. The size is the Bun runtime
@@ -312,12 +312,10 @@ The server is bundled by `bun build --compile`, which carries the Bun runtime,
 so the sidecar is about 100 MB before compression.
 
 Installers are built by
-[`.github/workflows/release.yml`](.github/workflows/release.yml). Push a tag and
-they appear on a draft release:
-
-```bash
-git tag v0.1.0 && git push origin v0.1.0
-```
+[`.github/workflows/release.yml`](.github/workflows/release.yml). A release is
+the version in `package.json`: bump it — along with `src-tauri/tauri.conf.json`
+and `src-tauri/Cargo.toml`, which have to agree — and when that lands on `main`
+the installers appear on a draft release tagged `v<version>`.
 
 To try a build without announcing one, run the workflow by hand from the Actions
 tab; the installers come back as workflow artifacts instead.
@@ -329,6 +327,10 @@ bun run dev           # reload on change
 bun run check         # oxlint + oxfmt
 bun run check-types   # tsc --noEmit
 ```
+
+Work starts from an issue and lands on `dev`; `main` holds what has been
+released. [`CONTRIBUTING.md`](CONTRIBUTING.md) has the branch, commit and
+release steps.
 
 `src/` is the server and the UI, `src-tauri/` is the desktop shell. The two talk
 over HTTP like any other client, so the shell holds no state of its own — it
