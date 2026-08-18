@@ -102,6 +102,14 @@ type State = {
     pausedUntil: number | null;
     schedule: { enabled: boolean; from: string; to: string };
   };
+  /** How far the run in flight has got, or null when nothing is reporting. */
+  progress: {
+    promptId: string;
+    value: number;
+    max: number;
+    node: string | null;
+    at: number;
+  } | null;
   desktop: { autostart: boolean; closeAction: "tray" | "quit" };
   jobs: JobRecord[];
 };
@@ -182,6 +190,11 @@ function formatTime(ms: number): string {
   return new Date(ms).toLocaleTimeString(locale());
 }
 
+/** Whole percent, clamped — a step past the max would otherwise overflow the bar. */
+function progressPercent(progress: { value: number; max: number }): number {
+  return Math.min(100, Math.max(0, Math.round((progress.value / progress.max) * 100)));
+}
+
 /** Whole minutes still to go. Never zero: seconds left is still time left. */
 function minutesLeft(until: number): number {
   return Math.max(1, Math.ceil((until - Date.now()) / 60_000));
@@ -229,7 +242,10 @@ function outputUrl(output: RunOutput): string {
   return `/api/output?${query}`;
 }
 
-async function post(path: string, body?: unknown): Promise<{ ok: boolean; error?: string }> {
+async function post<T = unknown>(
+  path: string,
+  body?: unknown,
+): Promise<{ ok: boolean; error?: string; data?: T }> {
   try {
     const res = await fetch(path, {
       method: "POST",
@@ -239,8 +255,10 @@ async function post(path: string, body?: unknown): Promise<{ ok: boolean; error?
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
-    const parsed = (await res.json().catch(() => ({}))) as { error?: string };
-    return res.ok ? { ok: true } : { ok: false, error: parsed.error ?? `HTTP ${res.status}` };
+    const parsed = (await res.json().catch(() => ({}))) as { error?: string } & T;
+    return res.ok
+      ? { ok: true, data: parsed }
+      : { ok: false, error: parsed.error ?? `HTTP ${res.status}` };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
@@ -328,6 +346,10 @@ function renderVitals(state: State): void {
       : chip(t("vitals.agent"), `${pad(healthy)}/${pad(total)}`, agentTone),
     chip(t("vitals.work"), work.label, work.tone),
   ];
+
+  if (state.progress && state.progress.max > 0) {
+    chips.push(chip(t("vitals.progress"), `${progressPercent(state.progress)}%`, "run"));
+  }
 
   if (comfyProcess.managed) {
     chips.push(chip(t("vitals.process"), `pid ${comfyProcess.pid ?? "?"}`, "run"));
@@ -444,7 +466,14 @@ function renderWorkflows(state: State): void {
 // Upstream servers — an editor, so polling must not overwrite what is typed
 // ---------------------------------------------------------------------------
 
-type ServerRow = UpstreamView & { secret: string };
+type UpstreamTest = { ok: boolean; ms: number; pendingJobs?: number; error?: string };
+
+/**
+ * A row as it stands on screen: the stored server, the secret box (blank means
+ * "keep the stored one"), and the last test of it. `testing` is held on the row
+ * rather than globally so testing one server leaves the others alone.
+ */
+type ServerRow = UpstreamView & { secret: string; testing?: boolean; test?: UpstreamTest };
 
 let serverRows: ServerRow[] | null = null;
 let serversDirty = false;
@@ -459,6 +488,23 @@ function heartbeatFor(state: State, row: ServerRow): string {
   return `<span class="state"><span class="dot ${beat.ok ? "ok" : "bad"}"></span>${
     beat.ok ? t("servers.up") : t("servers.down")
   }${waiting}</span>`;
+}
+
+/** The last test of this row, in its own words. Nothing until one is run. */
+function testResultFor(row: ServerRow): string {
+  if (row.testing) return `<p class="meta">${t("servers.testing")}</p>`;
+  if (!row.test) return "";
+
+  if (!row.test.ok) {
+    return `<p class="error">${t("servers.testFailed", {
+      error: esc(row.test.error ?? ""),
+    })}</p>`;
+  }
+  const queued =
+    row.test.pendingJobs === undefined
+      ? ""
+      : ` · ${t("servers.queued", { count: row.test.pendingJobs })}`;
+  return `<p class="meta">${t("servers.testOk", { ms: row.test.ms })}${queued}</p>`;
 }
 
 function renderServers(state: State): void {
@@ -477,6 +523,9 @@ function renderServers(state: State): void {
           <span class="mono muted">${pad(index + 1)}</span>
           ${heartbeatFor(state, row)}
           <span class="spacer"></span>
+          <button type="button" class="ghost" data-test-server="${index}">${t(
+            "servers.test",
+          )}</button>
           <button type="button" class="ghost" data-move="${index}" data-dir="-1" ${
             index === 0 ? "disabled" : ""
           } title="${t("servers.higher")}">↑</button>
@@ -515,9 +564,39 @@ function renderServers(state: State): void {
           <input type="checkbox" data-field="enabled" ${row.enabled ? "checked" : ""} />
           <span>${t("servers.enabled")}</span>
         </label>
+        ${testResultFor(row)}
       </div>`,
     )
     .join("")}</div>`;
+}
+
+/**
+ * Ask one server for a heartbeat now and keep the answer on its row. What is on
+ * screen is sent, so a secret typed a moment ago is what gets tried.
+ */
+async function testServer(index: number): Promise<void> {
+  const row = serverRows?.[index];
+  if (!row || !latestState) return;
+
+  row.testing = true;
+  row.test = undefined;
+  renderServers(latestState);
+
+  const result = await post<UpstreamTest>("/api/upstreams/test", {
+    id: row.id || undefined,
+    url: row.url,
+    hostId: row.hostId,
+    // Blank means the stored one, exactly as saving reads it.
+    secret: row.secret,
+  });
+
+  row.testing = false;
+  // A request the server refused outright — a row with no URL yet — is the same
+  // kind of answer as one it sent: it belongs on the row, not in the console.
+  row.test = result.ok
+    ? (result.data ?? { ok: true, ms: 0 })
+    : { ok: false, ms: 0, error: result.error ?? "" };
+  if (latestState) renderServers(latestState);
 }
 
 /** Copy what is on screen back into the model before any structural change. */
@@ -581,7 +660,25 @@ function jobError(job: JobRecord): string {
   return job.error ? `<p class="error">${esc(job.error)}</p>` : "";
 }
 
-function jobEntry(job: JobRecord, withDelete: boolean): string {
+/**
+ * The bar under a running row, and nothing at all otherwise. Matched by prompt
+ * id: ComfyUI reports on the prompt it is executing, which is only this job when
+ * the two ids agree — anything else on that queue is not ours to draw.
+ */
+function progressBar(job: JobRecord, progress: State["progress"]): string {
+  if (job.state !== "running" || !progress || progress.max <= 0) return "";
+  if (!progress.promptId || progress.promptId !== job.promptId) return "";
+
+  const percent = progressPercent(progress);
+  return `<div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}">
+      <span style="width: ${percent}%"></span>
+    </div>
+    <p class="meta">${t("jobs.progress", { percent, value: progress.value, max: progress.max })}${
+      progress.node ? ` · ${t("jobs.node", { node: esc(progress.node) })}` : ""
+    }</p>`;
+}
+
+function jobEntry(job: JobRecord, withDelete: boolean, progress: State["progress"]): string {
   const tone = job.state === "running" ? "run" : job.state === "succeeded" ? "ok" : "bad";
   const origin =
     job.source === "upstream"
@@ -606,6 +703,7 @@ function jobEntry(job: JobRecord, withDelete: boolean): string {
     <p class="meta">${formatTime(job.startedAt)} · ${timing}${origin}${
       job.promptId ? ` · ${t("jobs.prompt", { id: esc(job.promptId.slice(0, 8)) })}` : ""
     }</p>
+    ${progressBar(job, progress)}
     ${jobError(job)}
     ${job.outputs?.length ? renderOutputs(job.outputs) : ""}
   </div>`;
@@ -616,7 +714,7 @@ function renderJobs(state: State): void {
     renderIfChanged(nodes.jobs, "jobs", `<p class="empty">${t("jobs.empty")}</p>`);
     return;
   }
-  const html = state.jobs.map((job) => jobEntry(job, true)).join("");
+  const html = state.jobs.map((job) => jobEntry(job, true, state.progress)).join("");
   renderIfChanged(nodes.jobs, "jobs", `<div class="ledger">${html}</div>`);
 }
 
@@ -1087,6 +1185,13 @@ nodes.servers.addEventListener("click", (event) => {
       serversDirty = true;
       if (latestState) renderServers(latestState);
     }
+    return;
+  }
+
+  const test = target.closest<HTMLElement>("[data-test-server]");
+  if (test && serverRows) {
+    readServerInputs();
+    void testServer(Number(test.dataset["testServer"]));
     return;
   }
 

@@ -912,6 +912,23 @@ button.ghost.danger:hover:not(:disabled) {
   accent-color: var(--primary);
 }
 
+/* How far along the run in flight is, when ComfyUI is counting steps. */
+.bar {
+  height: 0.375rem;
+  margin-top: var(--space-2xs);
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--muted);
+}
+
+.bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
+  transition: width var(--dur-mid) var(--ease-out);
+}
+
 /* The child process's own words, so a wrong command explains itself. */
 .log {
   max-height: 14rem;

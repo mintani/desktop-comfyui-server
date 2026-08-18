@@ -1,3 +1,4 @@
+import { CLIENT_ID } from "./progress";
 import type { ApiWorkflow } from "./slots";
 import type { ComfyStatusResult, OutputKind, RunOutput } from "./types";
 
@@ -76,7 +77,9 @@ export async function queuePrompt(baseUrl: string, workflow: ApiWorkflow): Promi
   const res = await fetch(`${baseUrl}/prompt`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt: workflow }),
+    // The client id is what makes ComfyUI address its progress messages at the
+    // socket in `progress.ts` rather than at nobody.
+    body: JSON.stringify({ prompt: workflow, client_id: CLIENT_ID }),
     signal: AbortSignal.timeout(30_000),
   });
 

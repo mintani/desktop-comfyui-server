@@ -78,6 +78,11 @@ change something.
 other. Handy for checking a workflow does what you think before a job server
 starts sending work.
 
+A run in flight carries a bar — the steps ComfyUI has done out of the steps it
+expects, and the node it is on — so a slow workflow can be told from a stuck one.
+Jobs claimed from a job server land in the same history, so they get the same
+bar, and the status bar carries the percentage on either page.
+
 The header switches the theme and the language, and the button beside them opens
 the app's own settings — the same switches the tray menu carries.
 
@@ -209,6 +214,11 @@ Left alone, the app runs standalone. Add a server on the Settings page and it
 also polls for queued jobs, runs them through the active workflow and uploads
 the result — which is the point of the tray: the machine keeps serving with
 nothing on screen.
+
+Each row has a *Test* button. It sends one heartbeat there and then, so a wrong
+secret answers `HTTP 401` immediately instead of looking like an unreachable host
+until the next beat. It tests what is on screen, so a secret you have typed but
+not saved is the one tried; leaving the box blank tests the stored one.
 
 Several can be served at once. They are asked in the order the list puts them,
 so the top of the list is the priority: a server with work queued keeps this
