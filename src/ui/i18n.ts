@@ -268,6 +268,13 @@ const STRINGS = {
   },
   "workflows.deleteFailed": { en: "delete failed", ja: "削除できませんでした" },
   "workflows.nodes": { en: "{count} nodes", ja: "ノード {count} 個" },
+  "workflows.check": { en: "Check", ja: "チェック" },
+  "workflows.checking": { en: "checking against ComfyUI…", ja: "ComfyUI と照合中…" },
+  "workflows.checkOk": {
+    en: "every node and choice is available on this ComfyUI",
+    ja: "ノードもモデルも、この ComfyUI にすべて揃っています",
+  },
+  "workflows.checkFailed": { en: "check failed", ja: "チェックできませんでした" },
 
   "slot.detected": { en: "detected", ja: "自動検出" },
   "slot.override": { en: "from .slots.json", ja: ".slots.json での指定" },

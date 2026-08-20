@@ -197,6 +197,12 @@ The Workflows page shows which of these were found, so a workflow that needs hel
 is obvious before you run it. Anything not found is simply not offered — a
 workflow with no `LoadImage` gets no image field.
 
+*Check* on a workflow's row goes further: it asks the running ComfyUI — via
+`/object_info` — whether every node type in the file exists there, and whether
+every file-choosing input (checkpoints, LoRAs, VAEs, …) names something
+actually installed, without running anything. Inputs the app replaces at run
+time, the input image above all, are left out of the check.
+
 Outputs are not detected in advance. Whatever ComfyUI records in its history for
 the run is collected, so images, videos and gifs all work with no configuration.
 
