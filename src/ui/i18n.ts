@@ -116,6 +116,39 @@ const STRINGS = {
   "desktop.saved": { en: "saved", ja: "保存しました" },
   "desktop.saveFailed": { en: "save failed", ja: "保存できませんでした" },
 
+  // Notifications — the sentence for each event kind the server records ------
+  "notify.label": { en: "Notifications", ja: "通知" },
+  "notify.enable": { en: "Notify about failures", ja: "失敗や切断を通知する" },
+  "notify.unsupported": {
+    en: "this browser cannot show notifications",
+    ja: "このブラウザは通知に対応していません",
+  },
+  "notify.blocked": {
+    en: "the browser refused — allow notifications for this site",
+    ja: "ブラウザに拒否されました。このサイトの通知を許可してください",
+  },
+  "notify.job-failed": { en: "Job failed: {workflow}", ja: "ジョブ失敗: {workflow}" },
+  "notify.upstream-down": {
+    en: "Job server not answering: {server}",
+    ja: "ジョブサーバー応答なし: {server}",
+  },
+  "notify.upstream-up": {
+    en: "Job server back: {server}",
+    ja: "ジョブサーバー復帰: {server}",
+  },
+  "notify.comfy-crashed": {
+    en: "ComfyUI crashed — restarting it",
+    ja: "ComfyUI がクラッシュしました。再起動します",
+  },
+  "notify.comfy-gave-up": {
+    en: "ComfyUI keeps crashing — gave up restarting",
+    ja: "ComfyUI がクラッシュを繰り返すため、再起動を諦めました",
+  },
+  "notify.outputs-trimmed": {
+    en: "Old outputs deleted: {files} files ({size})",
+    ja: "古い出力を削除しました: {files} ファイル（{size}）",
+  },
+
   "nav.label": { en: "Sections", ja: "セクション" },
   "nav.workflows": { en: "Workflows", ja: "ワークフロー" },
   "nav.comfyui": { en: "ComfyUI", ja: "ComfyUI" },
@@ -132,6 +165,7 @@ const STRINGS = {
   "vitals.process": { en: "process", ja: "プロセス" },
   "vitals.access": { en: "access", ja: "アクセス" },
   "vitals.work": { en: "work", ja: "受付" },
+  "vitals.vram": { en: "VRAM", ja: "VRAM" },
   "vitals.progress": { en: "progress", ja: "進捗" },
   "vitals.tokenNeeded": {
     en: "open this page as ?token=<UI_TOKEN>",
@@ -188,6 +222,21 @@ const STRINGS = {
     ja: "{percent}% · {value}/{max} ステップ",
   },
   "jobs.node": { en: "node {node}", ja: "ノード {node}" },
+  "jobs.attempt": { en: "attempt {count}", ja: "試行 {count} 回目" },
+  "jobs.all": { en: "All", ja: "すべて" },
+  "jobs.filterState": { en: "State", ja: "状態" },
+  "jobs.filterSource": { en: "Source", ja: "発生元" },
+  "jobs.filterView": { en: "View", ja: "表示" },
+  "jobs.listView": { en: "List", ja: "リスト" },
+  "jobs.galleryView": { en: "Gallery", ja: "ギャラリー" },
+  "jobs.noMatch": {
+    en: "Nothing in the history matches the filter.",
+    ja: "条件に合う履歴はありません。",
+  },
+  "jobs.noMedia": {
+    en: "No images or videos in the filtered runs yet.",
+    ja: "条件に合う画像・動画はまだありません。",
+  },
   "jobs.interrupted": { en: "interrupted by a restart", ja: "再起動で中断されました" },
   "jobs.delete": { en: "Delete", ja: "削除" },
 
@@ -219,6 +268,13 @@ const STRINGS = {
   },
   "workflows.deleteFailed": { en: "delete failed", ja: "削除できませんでした" },
   "workflows.nodes": { en: "{count} nodes", ja: "ノード {count} 個" },
+  "workflows.check": { en: "Check", ja: "チェック" },
+  "workflows.checking": { en: "checking against ComfyUI…", ja: "ComfyUI と照合中…" },
+  "workflows.checkOk": {
+    en: "every node and choice is available on this ComfyUI",
+    ja: "ノードもモデルも、この ComfyUI にすべて揃っています",
+  },
+  "workflows.checkFailed": { en: "check failed", ja: "チェックできませんでした" },
 
   "slot.detected": { en: "detected", ja: "自動検出" },
   "slot.override": { en: "from .slots.json", ja: ".slots.json での指定" },
@@ -258,6 +314,32 @@ const STRINGS = {
   },
   "process.startedAt": { en: "started {time} · pid {pid}", ja: "{time} に起動 · pid {pid}" },
   "process.foreign": { en: "not started from here", ja: "ここからは起動していません" },
+
+  // ComfyUI's output folder --------------------------------------------------
+  "outputs.title": { en: "Outputs", ja: "出力ファイル" },
+  "outputs.none": {
+    en: "No output folder under the ComfyUI directory yet.",
+    ja: "ComfyUI ディレクトリの下に output フォルダがまだありません。",
+  },
+  "outputs.count": { en: "{files} files · {size}", ja: "{files} ファイル · {size}" },
+  "outputs.olderThan": { en: "Older than (days)", ja: "何日より古いか" },
+  "outputs.auto": {
+    en: "Auto-delete after (days, 0 = off)",
+    ja: "自動削除する日数（0 = オフ）",
+  },
+  "outputs.trim": { en: "Delete old outputs", ja: "古い出力を削除" },
+  "outputs.confirm": {
+    en: "Delete outputs older than {days} days? The files are removed from disk.",
+    ja: "{days} 日より古い出力を削除しますか？ディスクからファイルが消えます。",
+  },
+  "outputs.needDays": { en: "enter how many days", ja: "日数を入力してください" },
+  "outputs.trimming": { en: "deleting…", ja: "削除中…" },
+  "outputs.trimFailed": { en: "delete failed", ja: "削除できませんでした" },
+  "outputs.trimmed": {
+    en: "removed {files} files ({size})",
+    ja: "{files} ファイル（{size}）を削除しました",
+  },
+  "outputs.saved": { en: "saved", ja: "保存しました" },
 
   // Upstream servers --------------------------------------------------------
   "servers.title": { en: "Upstream servers", ja: "上流サーバー" },
@@ -331,6 +413,11 @@ const STRINGS = {
 } satisfies Record<string, Entry>;
 
 export type Key = keyof typeof STRINGS;
+
+/** Whether the table has words for `value` — for keys built at runtime. */
+export function isKey(value: string): value is Key {
+  return value in STRINGS;
+}
 
 const DEFAULT_LANG: Lang = LANGS[0].code;
 const STORAGE_KEY = "lang";

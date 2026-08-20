@@ -70,7 +70,11 @@ done with.
 
 **ComfyUI** points the app at your install — where it is, and optionally the
 command to run there — and starts and stops it, with the tail of its output so
-a wrong command explains itself.
+a wrong command explains itself. A ComfyUI started here that crashes is started
+again on its own; three crashes in a row right after starting read as a broken
+command, so it stops trying and says why in the log. An *Outputs* panel shows
+how much disk ComfyUI's output folder holds, with a button — and an optional
+standing rule — that deletes files older than a chosen number of days.
 
 **Servers** attaches job servers: link one with a code from its own UI, or fill
 a row in by hand; reorder and disable them here too. The order is the priority.
@@ -81,7 +85,8 @@ details.
 
 **Generate** runs a workflow by hand: a form on one side, the run history on the
 other. Handy for checking a workflow does what you think before a job server
-starts sending work.
+starts sending work. The history narrows by state and by where the job came
+from, and flips into a gallery of everything the filtered runs produced.
 
 A run in flight carries a bar — the steps ComfyUI has done out of the steps it
 expects, and the node it is on — so a slow workflow can be told from a stuck one.
@@ -191,6 +196,12 @@ inputs without being told:
 The Workflows page shows which of these were found, so a workflow that needs help
 is obvious before you run it. Anything not found is simply not offered — a
 workflow with no `LoadImage` gets no image field.
+
+*Check* on a workflow's row goes further: it asks the running ComfyUI — via
+`/object_info` — whether every node type in the file exists there, and whether
+every file-choosing input (checkpoints, LoRAs, VAEs, …) names something
+actually installed, without running anything. Inputs the app replaces at run
+time, the input image above all, are left out of the check.
 
 Outputs are not detected in advance. Whatever ComfyUI records in its history for
 the run is collected, so images, videos and gifs all work with no configuration.

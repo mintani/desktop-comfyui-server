@@ -11,10 +11,15 @@
  * request can only say "start" or "stop" — it cannot say what to run. That
  * still means anyone who can reach the management UI can run the configured
  * command, which is why the UI binds to 127.0.0.1 unless you change it.
+ *
+ * A managed child that dies without being asked is restarted (see the watchdog
+ * constants below); only `stopComfy` — the Stop buttons and the Stopped mode —
+ * counts as being asked.
  */
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { pushEvent } from "./events";
 import { loadSettings } from "./settings";
 
 export type ComfyProcessState = {
@@ -33,10 +38,27 @@ export type ComfyProcessState = {
 
 const LOG_LINES = 40;
 
+/**
+ * The watchdog. A machine that serves jobs unattended is only as reliable as
+ * the ComfyUI under it, so a managed child that dies without being asked is
+ * started again. A child that keeps dying moments after starting is a broken
+ * command, not a hiccup — after three of those in a row it stops trying, and
+ * the log holds the reason.
+ */
+const RESTART_DELAY_MS = 5000;
+const FAST_FAIL_MS = 60_000;
+const MAX_FAST_FAILS = 3;
+
 let child: Bun.Subprocess | null = null;
 let startedAt: number | null = null;
 let lastError: string | null = null;
 const log: string[] = [];
+
+/** True between a successful start and a requested stop: "keep it running". */
+let wanted = false;
+let restartTimer: ReturnType<typeof setTimeout> | null = null;
+/** Consecutive deaths within {@link FAST_FAIL_MS} of starting. */
+let fastFails = 0;
 
 function note(line: string): void {
   for (const part of line.split("\n")) {
@@ -115,22 +137,30 @@ export async function startComfy(): Promise<void> {
 
   log.length = 0;
   lastError = null;
+  fastFails = 0;
+  wanted = true;
+  launch(command, settings.comfyDir);
+}
+
+function launch(command: string[], dir: string): void {
   note(`$ ${command.join(" ")}`);
 
   const spawned = Bun.spawn(command, {
-    cwd: settings.comfyDir,
+    cwd: dir,
     stdout: "pipe",
     stderr: "pipe",
     onExit(_proc, exitCode, signalCode) {
       note(`— exited (code ${exitCode ?? "null"}${signalCode ? `, ${signalCode}` : ""})`);
+      if (child !== spawned) return;
+
+      const uptime = Date.now() - (startedAt ?? Date.now());
+      child = null;
+      startedAt = null;
       // A non-zero exit with nothing asked of it is a failure worth surfacing.
-      if (child === spawned && exitCode !== 0 && signalCode === null) {
+      if (exitCode !== 0 && signalCode === null) {
         lastError = `ComfyUI exited with code ${exitCode}`;
       }
-      if (child === spawned) {
-        child = null;
-        startedAt = null;
-      }
+      maybeRestart(uptime);
     },
   });
 
@@ -139,6 +169,51 @@ export async function startComfy(): Promise<void> {
 
   void drain(spawned.stdout);
   void drain(spawned.stderr);
+}
+
+/** Called with how long the child lived, after every exit nobody asked for. */
+function maybeRestart(uptimeMs: number): void {
+  if (!wanted) return;
+
+  // A death after a long run gets a fresh allowance; one right after starting
+  // spends it.
+  fastFails = uptimeMs < FAST_FAIL_MS ? fastFails + 1 : 1;
+
+  if (fastFails > MAX_FAST_FAILS) {
+    wanted = false;
+    lastError = "ComfyUI keeps crashing right after starting — not restarting, check the log";
+    note(`— ${lastError}`);
+    pushEvent("comfy-gave-up");
+    return;
+  }
+
+  note(`— restarting in ${RESTART_DELAY_MS / 1000} s (crash ${fastFails}/${MAX_FAST_FAILS})`);
+  pushEvent("comfy-crashed");
+  restartTimer = setTimeout(() => {
+    restartTimer = null;
+    void restart();
+  }, RESTART_DELAY_MS);
+}
+
+/**
+ * The automatic path back up. Unlike {@link startComfy} it keeps the log, so
+ * the crash that caused it stays readable, and it re-reads the settings so a
+ * directory fixed in the meantime is what gets run.
+ */
+async function restart(): Promise<void> {
+  // Someone pressed Stop during the delay, or Start beat the timer to it.
+  if (!wanted || child) return;
+
+  const settings = await loadSettings();
+  const command = resolveCommand(settings.comfyDir, settings.comfyCommand);
+  if (!settings.comfyDir || !existsSync(settings.comfyDir) || command.length === 0) {
+    wanted = false;
+    lastError = "cannot restart ComfyUI — the directory or command is gone";
+    note(`— ${lastError}`);
+    return;
+  }
+
+  launch(command, settings.comfyDir);
 }
 
 async function drain(stream: ReadableStream<Uint8Array> | number | undefined): Promise<void> {
@@ -152,6 +227,13 @@ async function drain(stream: ReadableStream<Uint8Array> | number | undefined): P
  * two; a model still loading can take longer than anyone wants to wait.
  */
 export async function stopComfy(): Promise<void> {
+  // Asked to stop, so an exit is no longer something to undo.
+  wanted = false;
+  if (restartTimer) {
+    clearTimeout(restartTimer);
+    restartTimer = null;
+  }
+
   const running = child;
   if (!running) return;
 

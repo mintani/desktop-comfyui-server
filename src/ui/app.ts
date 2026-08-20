@@ -7,7 +7,7 @@
  * into is left alone until they save or revert.
  */
 
-import { LANGS, lang, locale, onLangChange, setLang, t } from "./i18n";
+import { LANGS, isKey, lang, locale, onLangChange, setLang, t } from "./i18n";
 import type { Key, Lang } from "./i18n";
 
 type RunMode = "accepting" | "local" | "paused";
@@ -51,6 +51,8 @@ type JobRecord = {
   promptId?: string;
   outputs?: RunOutput[];
   error?: string;
+  /** Tries this job has had on this machine; absent means the first. */
+  attempts?: number;
   interrupted?: boolean;
 };
 
@@ -69,6 +71,8 @@ type State = {
     comfyStatus: "available" | "busy" | "unavailable";
     queueRunning: number;
     queuePending: number;
+    /** VRAM in bytes, as ComfyUI reports its GPU; null without one. */
+    gpu: { name: string; vramTotal: number; vramFree: number } | null;
     checkedAt: number;
   };
   comfyProcess: {
@@ -94,7 +98,9 @@ type State = {
     }[];
   };
   upstreams: UpstreamView[];
-  settings: { comfyDir: string; comfyCommand: string };
+  settings: { comfyDir: string; comfyCommand: string; outputCleanupDays: number };
+  /** ComfyUI's output folder as last scanned; null when there is none. */
+  outputs: { dir: string; files: number; bytes: number; scannedAt: number } | null;
   mode: RunMode;
   accepting: {
     accepting: boolean;
@@ -112,6 +118,8 @@ type State = {
   } | null;
   desktop: { autostart: boolean; closeAction: "tray" | "quit" };
   jobs: JobRecord[];
+  /** Ring of recent server-side events, oldest first; ids only ever grow. */
+  events: { id: number; at: number; kind: string; params: Record<string, string> }[];
 };
 
 const POLL_MS = 2000;
@@ -168,6 +176,14 @@ const nodes = {
   acceptNote: el("accept-note"),
   desktopAutostart: el<HTMLInputElement>("desktop-autostart"),
   desktopNote: el("desktop-note"),
+  notifyEnabled: el<HTMLInputElement>("notify-enabled"),
+  notifyNote: el("notify-note"),
+  outputsDir: el("outputs-dir"),
+  outputsInfo: el("outputs-info"),
+  outputsDays: el<HTMLInputElement>("outputs-days"),
+  outputsAuto: el<HTMLInputElement>("outputs-auto"),
+  outputsTrim: el<HTMLButtonElement>("outputs-trim"),
+  outputsNote: el("outputs-note"),
 };
 
 function esc(value: unknown): string {
@@ -196,6 +212,17 @@ function formatTime(ms: number): string {
 /** Whole percent, clamped — a step past the max would otherwise overflow the bar. */
 function progressPercent(progress: { value: number; max: number }): number {
   return Math.min(100, Math.max(0, Math.round((progress.value / progress.max) * 100)));
+}
+
+/** Bytes as gigabytes with one decimal, the unit VRAM is talked about in. */
+function gb(bytes: number): string {
+  return (bytes / 1024 ** 3).toFixed(1);
+}
+
+/** "3.2 GB" or "410 MB", for sizes whose scale is not known in advance. */
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 ** 3) return `${gb(bytes)} GB`;
+  return `${Math.round(bytes / 1024 ** 2)} MB`;
 }
 
 /** Whole minutes still to go. Never zero: seconds left is still time left. */
@@ -347,11 +374,27 @@ function renderVitals(state: State): void {
     chip(t("vitals.comfy"), esc(comfyStatusLabel(comfy.comfyStatus)), tone),
     chip(t("vitals.running"), pad(comfy.queueRunning)),
     chip(t("vitals.pending"), pad(comfy.queuePending)),
+  ];
+
+  // The GPU is what this machine lends out, so its headroom belongs up here.
+  // The dot only appears when the free VRAM is running out.
+  if (comfy.gpu) {
+    const low = comfy.gpu.vramFree / comfy.gpu.vramTotal < 0.1;
+    chips.push(
+      chip(
+        t("vitals.vram"),
+        `${gb(comfy.gpu.vramTotal - comfy.gpu.vramFree)}/${gb(comfy.gpu.vramTotal)} GB`,
+        low ? "warn" : undefined,
+      ),
+    );
+  }
+
+  chips.push(
     total === 0
       ? chip(t("vitals.agent"), t("vitals.standalone"))
       : chip(t("vitals.agent"), `${pad(healthy)}/${pad(total)}`, agentTone),
     chip(t("vitals.work"), work.label, work.tone),
-  ];
+  );
 
   if (state.progress && state.progress.max > 0) {
     chips.push(chip(t("vitals.progress"), `${progressPercent(state.progress)}%`, "run"));
@@ -429,6 +472,36 @@ function slotTags(summary: WorkflowSummary): string {
   return `<div class="slots">${tags.join("")}</div>`;
 }
 
+/**
+ * The last check of each workflow against the running ComfyUI, held here the
+ * way server test results are held on their rows. Nothing until one is run.
+ */
+type WorkflowCheck = { checking?: boolean; ok?: boolean; problems?: string[]; error?: string };
+const workflowChecks = new Map<string, WorkflowCheck>();
+
+function checkResultFor(name: string): string {
+  const check = workflowChecks.get(name);
+  if (!check) return "";
+  if (check.checking) return `<p class="meta">${t("workflows.checking")}</p>`;
+  if (check.error) return `<p class="error">${esc(check.error)}</p>`;
+  if (check.ok) return `<p class="meta">${t("workflows.checkOk")}</p>`;
+  return (check.problems ?? []).map((problem) => `<p class="error">${esc(problem)}</p>`).join("");
+}
+
+async function runWorkflowCheck(name: string): Promise<void> {
+  workflowChecks.set(name, { checking: true });
+  if (latestState) renderWorkflows(latestState);
+
+  const result = await post<{ ok: boolean; problems: string[] }>("/api/workflows/check", { name });
+  workflowChecks.set(
+    name,
+    result.ok
+      ? { ok: result.data?.ok ?? false, problems: result.data?.problems ?? [] }
+      : { error: result.error ?? t("workflows.checkFailed") },
+  );
+  if (latestState) renderWorkflows(latestState);
+}
+
 function renderWorkflows(state: State): void {
   nodes.workflowDir.textContent = t("workflows.dir", { dir: state.workflowDir });
 
@@ -446,6 +519,11 @@ function renderWorkflows(state: State): void {
           ${active ? `<span class="state"><span class="dot run"></span>${t("workflows.active")}</span>` : ""}
           <span class="spacer"></span>
           ${
+            summary.valid
+              ? `<button type="button" class="ghost" data-check-workflow="${esc(summary.name)}">${t("workflows.check")}</button>`
+              : ""
+          }
+          ${
             active || !summary.valid
               ? ""
               : `<button type="button" class="ghost" data-activate="${esc(summary.name)}">${t("workflows.makeActive")}</button>`
@@ -461,6 +539,7 @@ function renderWorkflows(state: State): void {
         ${head}
         <p class="meta">${t("workflows.nodes", { count: summary.nodeCount ?? 0 })}</p>
         ${slotTags(summary)}
+        ${checkResultFor(summary.name)}
       </div>`;
     })
     .join("");
@@ -708,6 +787,8 @@ function jobEntry(job: JobRecord, withDelete: boolean, progress: State["progress
     </div>
     <p class="meta">${formatTime(job.startedAt)} · ${timing}${origin}${
       job.promptId ? ` · ${t("jobs.prompt", { id: esc(job.promptId.slice(0, 8)) })}` : ""
+    }${
+      job.attempts && job.attempts > 1 ? ` · ${t("jobs.attempt", { count: job.attempts })}` : ""
     }</p>
     ${progressBar(job, progress)}
     ${jobError(job)}
@@ -715,12 +796,62 @@ function jobEntry(job: JobRecord, withDelete: boolean, progress: State["progress
   </div>`;
 }
 
+// Page-local: the history itself is what it is, only its reading is chosen.
+type JobStateFilter = "all" | JobRecord["state"];
+type JobSourceFilter = "all" | JobRecord["source"];
+type JobsView = "list" | "gallery";
+
+let jobStateFilter: JobStateFilter = "all";
+let jobSourceFilter: JobSourceFilter = "all";
+let jobsView: JobsView = "list";
+
+/**
+ * Every image and video the filtered runs produced, newest first, each cell
+ * opening (or playing) the file itself. Failures and files that are neither
+ * are the list view's business.
+ */
+function galleryHtml(jobs: JobRecord[]): string {
+  const cells: string[] = [];
+  for (const job of jobs) {
+    for (const output of job.outputs ?? []) {
+      const url = outputUrl(output);
+      const name = esc(output.filename);
+      const caption = `${esc(job.workflow)} · ${formatTime(job.startedAt)}`;
+      if (output.kind === "image") {
+        cells.push(
+          `<a class="cell" href="${url}" target="_blank" rel="noreferrer" title="${caption}">` +
+            `<img src="${url}" alt="${name}" loading="lazy" /></a>`,
+        );
+      } else if (output.kind === "video") {
+        cells.push(
+          `<div class="cell" title="${caption}">` +
+            `<video src="${url}" controls preload="metadata" title="${name}"></video></div>`,
+        );
+      }
+    }
+  }
+  if (cells.length === 0) return `<p class="empty">${t("jobs.noMedia")}</p>`;
+  return `<div class="gallery">${cells.join("")}</div>`;
+}
+
 function renderJobs(state: State): void {
-  if (state.jobs.length === 0) {
-    renderIfChanged(nodes.jobs, "jobs", `<p class="empty">${t("jobs.empty")}</p>`);
+  const jobs = state.jobs.filter(
+    (job) =>
+      (jobStateFilter === "all" || job.state === jobStateFilter) &&
+      (jobSourceFilter === "all" || job.source === jobSourceFilter),
+  );
+
+  if (jobsView === "gallery") {
+    renderIfChanged(nodes.jobs, "jobs", galleryHtml(jobs));
     return;
   }
-  const html = state.jobs.map((job) => jobEntry(job, true, state.progress)).join("");
+  if (jobs.length === 0) {
+    // An empty history and a filter that matched nothing read differently.
+    const text = state.jobs.length === 0 ? t("jobs.empty") : t("jobs.noMatch");
+    renderIfChanged(nodes.jobs, "jobs", `<p class="empty">${text}</p>`);
+    return;
+  }
+  const html = jobs.map((job) => jobEntry(job, true, state.progress)).join("");
   renderIfChanged(nodes.jobs, "jobs", `<div class="ledger">${html}</div>`);
 }
 
@@ -734,6 +865,59 @@ function syncSettings(state: State): void {
   if (settingsDirty) return;
   nodes.comfyDir.value = state.settings.comfyDir;
   nodes.comfyCommand.value = state.settings.comfyCommand;
+}
+
+// ---------------------------------------------------------------------------
+// Outputs — ComfyUI's output folder
+// ---------------------------------------------------------------------------
+
+function syncOutputs(state: State): void {
+  if (!state.outputs) {
+    nodes.outputsDir.textContent = "";
+    nodes.outputsInfo.textContent = t("outputs.none");
+    nodes.outputsTrim.disabled = true;
+  } else {
+    nodes.outputsDir.textContent = state.outputs.dir;
+    nodes.outputsInfo.textContent = t("outputs.count", {
+      files: state.outputs.files,
+      size: formatBytes(state.outputs.bytes),
+    });
+    nodes.outputsTrim.disabled = false;
+  }
+
+  // Like the schedule times: only the field being typed into is left alone.
+  if (document.activeElement !== nodes.outputsAuto) {
+    nodes.outputsAuto.value = String(state.settings.outputCleanupDays);
+  }
+}
+
+async function trimOutputsNow(): Promise<void> {
+  const days = Number(nodes.outputsDays.value);
+  if (!Number.isFinite(days) || days < 1) {
+    setNote(nodes.outputsNote, t("outputs.needDays"), true);
+    return;
+  }
+  if (!confirm(t("outputs.confirm", { days }))) return;
+
+  nodes.outputsTrim.disabled = true;
+  setNote(nodes.outputsNote, t("outputs.trimming"));
+  const result = await post<{ removedFiles: number; removedBytes: number }>("/api/outputs/trim", {
+    days,
+  });
+  nodes.outputsTrim.disabled = false;
+
+  if (!result.ok) {
+    setNote(nodes.outputsNote, result.error ?? t("outputs.trimFailed"), true);
+    return;
+  }
+  setNote(
+    nodes.outputsNote,
+    t("outputs.trimmed", {
+      files: result.data?.removedFiles ?? 0,
+      size: formatBytes(result.data?.removedBytes ?? 0),
+    }),
+  );
+  void poll();
 }
 
 // ---------------------------------------------------------------------------
@@ -753,7 +937,10 @@ function openPopover(target: Popover | null): void {
     popover.panel.hidden = !open;
     popover.button.setAttribute("aria-expanded", String(open));
   }
-  if (target !== DESKTOP_POPOVER) setNote(nodes.desktopNote, "");
+  if (target !== DESKTOP_POPOVER) {
+    setNote(nodes.desktopNote, "");
+    setNote(nodes.notifyNote, "");
+  }
   if (target !== MODE_POPOVER) setNote(nodes.modeNote, "");
 }
 
@@ -878,6 +1065,111 @@ async function saveDesktop(path: string, body: unknown): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Notifications — server-side events turned into OS notifications
+// ---------------------------------------------------------------------------
+
+const NOTIFY_KEY = "notify";
+const NOTIFY_SEEN_KEY = "notify-seen";
+
+function notifyOn(): boolean {
+  try {
+    return localStorage.getItem(NOTIFY_KEY) === "on";
+  } catch {
+    return false;
+  }
+}
+
+function storeNotify(on: boolean): void {
+  try {
+    localStorage.setItem(NOTIFY_KEY, on ? "on" : "off");
+  } catch {
+    // Private mode — the choice lasts for this tab only.
+  }
+}
+
+let notifySeen = (() => {
+  try {
+    return Number(localStorage.getItem(NOTIFY_SEEN_KEY) ?? "0") || 0;
+  } catch {
+    return 0;
+  }
+})();
+
+/** False until the first poll: its backlog predates this page, so it is noise. */
+let notifyPrimed = false;
+
+function rememberSeen(id: number): void {
+  notifySeen = id;
+  try {
+    localStorage.setItem(NOTIFY_SEEN_KEY, String(id));
+  } catch {
+    // Private mode — an old event may notify again after a reload.
+  }
+}
+
+function notifyGranted(): boolean {
+  return "Notification" in window && Notification.permission === "granted";
+}
+
+function syncNotify(state: State): void {
+  const newest = state.events.at(-1)?.id ?? 0;
+
+  if (!notifyPrimed) {
+    notifyPrimed = true;
+    if (newest > notifySeen) rememberSeen(newest);
+    return;
+  }
+  if (newest <= notifySeen) return;
+
+  const fresh = state.events.filter((event) => event.id > notifySeen);
+  // Advanced even while notifications are off, so turning them on later does
+  // not replay history.
+  rememberSeen(newest);
+  if (!notifyOn() || !notifyGranted()) return;
+
+  for (const event of fresh) {
+    const key = `notify.${event.kind}`;
+    // A kind this page has no words for is skipped rather than crashed on —
+    // the server can be newer than a cached page.
+    if (!isKey(key)) continue;
+    try {
+      new Notification(t(key, event.params), {
+        body: event.params["error"] ?? "",
+        tag: `dcs-${event.id}`,
+      });
+    } catch {
+      // The permission can be revoked between polls; nothing to be done.
+    }
+  }
+}
+
+/**
+ * Turning it on asks the browser there and then, so the permission prompt is
+ * the answer to a click rather than appearing out of nowhere.
+ */
+async function setNotify(on: boolean): Promise<void> {
+  if (!on) {
+    storeNotify(false);
+    setNote(nodes.notifyNote, "");
+    return;
+  }
+  if (!("Notification" in window)) {
+    nodes.notifyEnabled.checked = false;
+    setNote(nodes.notifyNote, t("notify.unsupported"), true);
+    return;
+  }
+  const permission =
+    Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
+  if (permission !== "granted") {
+    nodes.notifyEnabled.checked = false;
+    setNote(nodes.notifyNote, t("notify.blocked"), true);
+    return;
+  }
+  storeNotify(true);
+  setNote(nodes.notifyNote, "");
+}
+
+// ---------------------------------------------------------------------------
 // Run form
 // ---------------------------------------------------------------------------
 
@@ -944,9 +1236,11 @@ function render(state: State): void {
   syncServers(state);
   renderJobs(state);
   syncSettings(state);
+  syncOutputs(state);
   syncMode(state);
   syncAccepting(state);
   syncDesktop(state);
+  syncNotify(state);
   syncForm(state);
 }
 
@@ -1146,6 +1440,12 @@ nodes.uploadForm.addEventListener("submit", async (event) => {
 nodes.workflows.addEventListener("click", async (event) => {
   const target = event.target as HTMLElement;
 
+  const check = target.closest<HTMLElement>("[data-check-workflow]")?.dataset["checkWorkflow"];
+  if (check) {
+    void runWorkflowCheck(check);
+    return;
+  }
+
   const activate = target.closest<HTMLElement>("[data-activate]")?.dataset["activate"];
   if (activate) {
     await post("/api/workflows/active", { name: activate });
@@ -1285,6 +1585,44 @@ nodes.jobs.addEventListener("click", async (event) => {
   void poll();
 });
 
+function syncJobFilterButtons(): void {
+  const groups: [attribute: string, current: string][] = [
+    ["data-job-state", jobStateFilter],
+    ["data-job-source", jobSourceFilter],
+    ["data-job-view", jobsView],
+  ];
+  for (const [attribute, current] of groups) {
+    for (const button of document.querySelectorAll<HTMLElement>(`[${attribute}]`)) {
+      button.setAttribute("aria-pressed", String(button.getAttribute(attribute) === current));
+    }
+  }
+}
+
+/** The three groups differ only in which variable a click sets. */
+function wireJobFilter(id: string, attribute: string, apply: (value: string) => void): void {
+  el(id).addEventListener("click", (event) => {
+    const value = (event.target as HTMLElement)
+      .closest<HTMLElement>(`[${attribute}]`)
+      ?.getAttribute(attribute);
+    if (!value) return;
+    apply(value);
+    syncJobFilterButtons();
+    if (latestState) renderJobs(latestState);
+  });
+}
+
+wireJobFilter("jobs-state", "data-job-state", (value) => {
+  jobStateFilter = value as JobStateFilter;
+});
+wireJobFilter("jobs-source", "data-job-source", (value) => {
+  jobSourceFilter = value as JobSourceFilter;
+});
+wireJobFilter("jobs-view", "data-job-view", (value) => {
+  jobsView = value as JobsView;
+});
+
+syncJobFilterButtons();
+
 nodes.settingsForm.addEventListener("input", () => {
   settingsDirty = true;
 });
@@ -1319,6 +1657,22 @@ async function toggleComfy(): Promise<void> {
 
 nodes.comfyPower.addEventListener("click", () => void toggleComfy());
 nodes.comfyPower2.addEventListener("click", () => void toggleComfy());
+
+nodes.outputsTrim.addEventListener("click", () => void trimOutputsNow());
+
+// Saved on change like the schedule: one number is not worth a Save button.
+nodes.outputsAuto.addEventListener("change", async () => {
+  const days = Number(nodes.outputsAuto.value);
+  const result = await post("/api/settings", {
+    outputCleanupDays: Number.isFinite(days) ? days : 0,
+  });
+  setNote(
+    nodes.outputsNote,
+    result.ok ? t("outputs.saved") : (result.error ?? t("comfy.saveFailed")),
+    !result.ok,
+  );
+  void poll();
+});
 
 nodes.desktopOpen.addEventListener("click", () => toggle(DESKTOP_POPOVER));
 nodes.modeOpen.addEventListener("click", () => toggle(MODE_POPOVER));
@@ -1362,6 +1716,8 @@ nodes.desktopAutostart.addEventListener("change", () => {
   void saveDesktop("/api/desktop", { autostart: nodes.desktopAutostart.checked });
 });
 
+nodes.notifyEnabled.addEventListener("change", () => void setNotify(nodes.notifyEnabled.checked));
+
 nodes.desktopPanel.addEventListener("click", (event) => {
   const choice = (event.target as HTMLElement).closest<HTMLElement>("[data-close-action]")?.dataset[
     "closeAction"
@@ -1400,6 +1756,9 @@ setInterval(() => {
     if (Number.isFinite(started)) span.textContent = formatDuration(Date.now() - started);
   }
 }, 1000);
+
+// A permission revoked since last time reads as "off", matching what happens.
+nodes.notifyEnabled.checked = notifyOn() && notifyGranted();
 
 applyTheme(currentTheme());
 setLang(lang());

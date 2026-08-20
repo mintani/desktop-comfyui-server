@@ -152,6 +152,13 @@
               <button type="button" data-close-action="quit" data-i18n="desktop.quit">Quits</button>
             </div>
 
+            <p class="popover-label" data-i18n="notify.label">Notifications</p>
+            <label class="switch">
+              <input type="checkbox" id="notify-enabled" />
+              <span data-i18n="notify.enable">Notify about failures</span>
+            </label>
+            <p class="muted" id="notify-note"></p>
+
             <p class="muted" data-i18n="desktop.note"></p>
             <p class="muted" id="desktop-note"></p>
           </div>
@@ -332,6 +339,87 @@
                   Clear finished
                 </button>
               </div>
+
+              <!-- Narrowing and reshaping only — the history itself is what it
+                   is. The choices live in the page, not on the server. -->
+              <div class="filters">
+                <div
+                  class="segmented text"
+                  id="jobs-state"
+                  role="group"
+                  data-i18n-label="jobs.filterState"
+                >
+                  <button type="button" data-job-state="all" data-i18n="jobs.all">All</button>
+                  <button type="button" data-job-state="running" data-i18n="jobs.running">
+                    running
+                  </button>
+                  <button type="button" data-job-state="succeeded" data-i18n="jobs.succeeded">
+                    succeeded
+                  </button>
+                  <button type="button" data-job-state="failed" data-i18n="jobs.failed">
+                    failed
+                  </button>
+                </div>
+                <div
+                  class="segmented text"
+                  id="jobs-source"
+                  role="group"
+                  data-i18n-label="jobs.filterSource"
+                >
+                  <button type="button" data-job-source="all" data-i18n="jobs.all">All</button>
+                  <button type="button" data-job-source="ui" data-i18n="jobs.ui">UI</button>
+                  <button type="button" data-job-source="upstream" data-i18n="jobs.upstream">
+                    upstream
+                  </button>
+                </div>
+                <div
+                  class="segmented"
+                  id="jobs-view"
+                  role="group"
+                  data-i18n-label="jobs.filterView"
+                >
+                  <button
+                    type="button"
+                    data-job-view="list"
+                    data-i18n-title="jobs.listView"
+                    aria-pressed="true"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M4 6h16M4 12h16M4 18h16" />
+                    </svg>
+                    <span class="sr-only" data-i18n="jobs.listView">List</span>
+                  </button>
+                  <button
+                    type="button"
+                    data-job-view="gallery"
+                    data-i18n-title="jobs.galleryView"
+                    aria-pressed="false"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      aria-hidden="true"
+                    >
+                      <rect x="4" y="4" width="7" height="7" rx="1" />
+                      <rect x="13" y="4" width="7" height="7" rx="1" />
+                      <rect x="4" y="13" width="7" height="7" rx="1" />
+                      <rect x="13" y="13" width="7" height="7" rx="1" />
+                    </svg>
+                    <span class="sr-only" data-i18n="jobs.galleryView">Gallery</span>
+                  </button>
+                </div>
+              </div>
+
               <div id="jobs"></div>
             </section>
           </div>
@@ -407,6 +495,30 @@
               <button type="button" class="ghost" id="comfy-power-2">Start</button>
             </div>
             <div id="comfy-process"></div>
+          </section>
+
+          <!-- What ComfyUI's output folder holds. Nothing in ComfyUI ever
+               deletes an output, so the disk fills quietly without this. -->
+          <section class="panel">
+            <div class="panel-head"><h2 data-i18n="outputs.title">Outputs</h2></div>
+            <p class="mono muted" id="outputs-dir"></p>
+            <p class="muted" id="outputs-info"></p>
+            <div class="row">
+              <label class="field">
+                <span data-i18n="outputs.olderThan">Older than (days)</span>
+                <input type="number" id="outputs-days" min="1" value="30" />
+              </label>
+              <label class="field">
+                <span data-i18n="outputs.auto">Auto-delete after (days, 0 = off)</span>
+                <input type="number" id="outputs-auto" min="0" />
+              </label>
+            </div>
+            <div class="actions">
+              <button type="button" class="ghost danger" id="outputs-trim" data-i18n="outputs.trim">
+                Delete old outputs
+              </button>
+              <p class="muted" id="outputs-note"></p>
+            </div>
           </section>
         </section>
 

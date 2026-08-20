@@ -3,6 +3,7 @@ import { agentSnapshot, applyUpstreamChange } from "../agent";
 import { interrupt, uploadImage, viewUrl } from "../comfy";
 import { comfyProcessState, startComfy, stopComfy } from "../comfy-process";
 import { COMFY_URL, UI_HOSTNAME, UI_PORT, UI_TOKEN, WORKFLOW_DIR } from "../config";
+import { listEvents } from "../events";
 import {
   clearFinishedJobs,
   completeJob,
@@ -12,12 +13,14 @@ import {
   removeJob,
   startJob,
 } from "../jobs";
+import { outputsSnapshot, rescanOutputs, trimOutputs } from "../outputs";
 import { latestProgress } from "../progress";
 import {
   RUN_MODES,
   hostFromUrl,
   loadSettings,
   newUpstreamId,
+  normaliseCleanupDays,
   publicUpstreams,
   saveSettings,
 } from "../settings";
@@ -33,6 +36,7 @@ import {
   setActiveWorkflow,
 } from "../workflow";
 import { claimLinkCode, testUpstream } from "../upstream";
+import { checkWorkflow } from "../validate";
 import { authorise } from "./guard";
 import index from "./index.html";
 import type { AcceptSchedule, RunMode, UpstreamConfig } from "../settings";
@@ -57,12 +61,18 @@ async function handleState(): Promise<Response> {
     activeWorkflow: await activeWorkflowName(),
     agent: agentSnapshot(),
     upstreams: publicUpstreams(settings),
-    settings: { comfyDir: settings.comfyDir, comfyCommand: settings.comfyCommand },
+    settings: {
+      comfyDir: settings.comfyDir,
+      comfyCommand: settings.comfyCommand,
+      outputCleanupDays: settings.outputCleanupDays,
+    },
+    outputs: outputsSnapshot(),
     mode: settings.mode,
     accepting: acceptState(settings),
     progress: latestProgress(),
     desktop: settings.desktop,
     jobs: listJobs(),
+    events: listEvents(),
   });
 }
 
@@ -102,6 +112,17 @@ async function handleWorkflowUpload(req: Request): Promise<Response> {
 
     const summary = await saveWorkflowFile(name, await file.text());
     return Response.json({ workflow: summary });
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/** Compare one workflow against the running ComfyUI — see `validate.ts`. */
+async function handleWorkflowCheck(req: Request): Promise<Response> {
+  try {
+    const { name } = (await req.json()) as { name?: string };
+    if (!name) return fail("name is required");
+    return Response.json(await checkWorkflow(name));
   } catch (err) {
     return fail(err);
   }
@@ -190,10 +211,10 @@ async function handleUpstreamTest(req: Request): Promise<Response> {
     const secret = (input.secret ?? "").trim() || stored?.secret || "";
     if (!secret) return fail("a secret is needed");
 
-    const { comfyStatus, queueRunning, queuePending } = latestStatus();
+    const { comfyStatus, queueRunning, queuePending, gpu } = latestStatus();
     const result = await testUpstream(
       { name: url, url, hostId, secret },
-      { comfyStatus, queueRunning, queuePending },
+      { comfyStatus, queueRunning, queuePending, gpu },
     );
     return Response.json(result);
   } catch (err) {
@@ -263,14 +284,43 @@ async function handleLink(req: Request): Promise<Response> {
 
 async function handleSettingsSave(req: Request): Promise<Response> {
   try {
-    const body = (await req.json()) as { comfyDir?: string; comfyCommand?: string };
+    const body = (await req.json()) as {
+      comfyDir?: string;
+      comfyCommand?: string;
+      outputCleanupDays?: unknown;
+    };
     const saved = await saveSettings({
       ...(body.comfyDir === undefined ? {} : { comfyDir: body.comfyDir.trim() }),
       ...(body.comfyCommand === undefined ? {} : { comfyCommand: body.comfyCommand.trim() }),
+      ...(body.outputCleanupDays === undefined
+        ? {}
+        : { outputCleanupDays: normaliseCleanupDays(body.outputCleanupDays) }),
     });
+    // A different directory means a different output folder to count.
+    if (body.comfyDir !== undefined) void rescanOutputs();
     return Response.json({
-      settings: { comfyDir: saved.comfyDir, comfyCommand: saved.comfyCommand },
+      settings: {
+        comfyDir: saved.comfyDir,
+        comfyCommand: saved.comfyCommand,
+        outputCleanupDays: saved.outputCleanupDays,
+      },
     });
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/**
+ * Delete outputs older than the given days, right now. The stored rule is the
+ * quiet version of this; the button wants its result in the response.
+ */
+async function handleOutputsTrim(req: Request): Promise<Response> {
+  try {
+    const { days } = (await req.json()) as { days?: unknown };
+    if (typeof days !== "number" || !Number.isFinite(days) || days < 1 || days > 3650) {
+      return fail("days must be a number between 1 and 3650");
+    }
+    return Response.json(await trimOutputs(Math.floor(days)));
   } catch (err) {
     return fail(err);
   }
@@ -562,6 +612,7 @@ export function startUi() {
       "/api/workflows/active": { POST: guarded(handleSetActive) },
       "/api/workflows/reload": { POST: guarded(handleReload) },
       "/api/workflows/upload": { POST: guarded(handleWorkflowUpload) },
+      "/api/workflows/check": { POST: guarded(handleWorkflowCheck) },
       "/api/workflows/delete": { POST: guarded(handleWorkflowDelete) },
 
       "/api/upstreams": { POST: guarded(handleUpstreamsSave) },
@@ -569,6 +620,7 @@ export function startUi() {
       "/api/link": { POST: guarded(handleLink) },
 
       "/api/settings": { POST: guarded(handleSettingsSave) },
+      "/api/outputs/trim": { POST: guarded(handleOutputsTrim) },
       "/api/mode": { POST: guarded(handleMode) },
       "/api/accept/pause": { POST: guarded(handlePause) },
       "/api/accept/schedule": { POST: guarded(handleScheduleSave) },

@@ -9,6 +9,7 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import { JOBS_FILE } from "./config";
+import { pushEvent } from "./events";
 import type { JobRecord, JobSource, RunOutput } from "./types";
 
 const MAX_JOBS = 200;
@@ -71,6 +72,12 @@ export function markQueued(job: JobRecord, promptId: string): void {
   persist();
 }
 
+/** Records that the job is on its `attempt`-th try, so the UI can say so. */
+export function noteAttempt(job: JobRecord, attempt: number): void {
+  job.attempts = attempt;
+  persist();
+}
+
 export function completeJob(job: JobRecord, outputs: RunOutput[]): void {
   job.state = "succeeded";
   job.outputs = outputs;
@@ -83,6 +90,8 @@ export function failJob(job: JobRecord, error: string): void {
   job.error = error;
   job.finishedAt = Date.now();
   persist();
+  // Cut for a notification body, not for the record: `job.error` keeps it all.
+  pushEvent("job-failed", { workflow: job.workflow, error: error.slice(0, 200) });
 }
 
 export function listJobs(): JobRecord[] {

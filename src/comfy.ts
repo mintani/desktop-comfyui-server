@@ -1,13 +1,36 @@
 import { CLIENT_ID } from "./progress";
 import type { ApiWorkflow } from "./slots";
-import type { ComfyStatusResult, OutputKind, RunOutput } from "./types";
+import type { ComfyStatusResult, GpuStatus, OutputKind, RunOutput } from "./types";
 
 type ComfyQueueResponse = {
   queue_running?: unknown[];
   queue_pending?: unknown[];
 };
 
-/** Reachability plus queue depth, used for heartbeats and the UI header. */
+type SystemStats = {
+  devices?: {
+    name?: string;
+    type?: string;
+    vram_total?: number;
+    vram_free?: number;
+  }[];
+};
+
+/** The first device that is not the CPU — the one the models actually load on. */
+function firstGpu(stats: SystemStats): GpuStatus | null {
+  const device = stats.devices?.find((entry) => entry.type !== "cpu");
+  if (
+    !device ||
+    typeof device.vram_total !== "number" ||
+    typeof device.vram_free !== "number" ||
+    device.vram_total <= 0
+  ) {
+    return null;
+  }
+  return { name: device.name ?? "GPU", vramTotal: device.vram_total, vramFree: device.vram_free };
+}
+
+/** Reachability, queue depth and VRAM, used for heartbeats and the UI header. */
 export async function checkComfy(baseUrl: string): Promise<ComfyStatusResult> {
   try {
     const signal = AbortSignal.timeout(5000);
@@ -17,9 +40,10 @@ export async function checkComfy(baseUrl: string): Promise<ComfyStatusResult> {
     ]);
 
     if (!statsRes.ok || !queueRes.ok) {
-      return { comfyStatus: "unavailable", queueRunning: 0, queuePending: 0 };
+      return { comfyStatus: "unavailable", queueRunning: 0, queuePending: 0, gpu: null };
     }
 
+    const stats = (await statsRes.json()) as SystemStats;
     const queue = (await queueRes.json()) as ComfyQueueResponse;
     const queueRunning = queue.queue_running?.length ?? 0;
     const queuePending = queue.queue_pending?.length ?? 0;
@@ -28,9 +52,10 @@ export async function checkComfy(baseUrl: string): Promise<ComfyStatusResult> {
       comfyStatus: queueRunning > 0 ? "busy" : "available",
       queueRunning,
       queuePending,
+      gpu: firstGpu(stats),
     };
   } catch {
-    return { comfyStatus: "unavailable", queueRunning: 0, queuePending: 0 };
+    return { comfyStatus: "unavailable", queueRunning: 0, queuePending: 0, gpu: null };
   }
 }
 
