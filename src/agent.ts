@@ -6,6 +6,7 @@ import {
   COMFY_URL,
   HEARTBEAT_INTERVAL_MS,
   JOB_RETRIES,
+  MODEL_SYNC_INTERVAL_MS,
   POLL_INTERVAL_MS,
   RETRY_DELAY_MS,
   UPDATE_CHECK_INTERVAL_MS,
@@ -23,7 +24,8 @@ import {
   sendHeartbeat,
   uploadResult,
 } from "./upstream";
-import { activeWorkflowName, runWorkflow } from "./workflow";
+import { fetchManifest, getReadyModels, reportObjectInfo, syncModels } from "./models";
+import { activeWorkflowName, runServerWorkflow, runWorkflow } from "./workflow";
 import type { UpstreamServer } from "./upstream";
 import type { ClaimedJob } from "./types";
 
@@ -39,6 +41,7 @@ let running = false;
 /** True while `pollLoop` is between its start and its `finally`. */
 let loopActive = false;
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+let modelSyncTimer: ReturnType<typeof setInterval> | null = null;
 
 /** Upstream view for the UI. Secrets are deliberately not included. */
 export function agentSnapshot() {
@@ -60,13 +63,16 @@ function message(err: unknown): string {
 
 async function sendHeartbeats() {
   const status = await refreshStatus();
+  // Which preset models this host holds, verified. The server assigns preset
+  // jobs only to hosts whose set covers the preset (douga-workflow #127).
+  const payload = { ...status, readyModels: getReadyModels() };
 
   await Promise.all(
     upstreams.map(async (server) => {
       // What the last beat said, so only a change of state is announced.
       const was = heartbeats.get(server.name)?.ok;
 
-      const ack = await sendHeartbeat(server, status);
+      const ack = await sendHeartbeat(server, payload);
       if (!ack) {
         heartbeats.set(server.name, { ok: false, at: Date.now() });
         if (was !== false) pushEvent("upstream-down", { server: server.name });
@@ -99,6 +105,12 @@ async function claimNext(): Promise<{ server: UpstreamServer; job: ClaimedJob } 
 }
 
 async function processJob(server: UpstreamServer, claimed: ClaimedJob) {
+  // A workflow object rides inside the claim (douga-workflow #127): run that,
+  // not a local file. Strings and absence keep the existing local-file path.
+  if (claimed.workflow && typeof claimed.workflow === "object") {
+    await processServerWorkflowJob(server, claimed, claimed.workflow);
+    return;
+  }
   const workflowName = claimed.workflow ?? (await activeWorkflowName());
   if (!workflowName) {
     const reason = "no workflow installed — drop an API-format workflow into workflows/";
@@ -173,6 +185,51 @@ async function processJob(server: UpstreamServer, claimed: ClaimedJob) {
       await reportFailure(server, claimed.jobId, reason);
       return;
     }
+  }
+}
+
+async function processServerWorkflowJob(
+  server: UpstreamServer,
+  claimed: ClaimedJob,
+  spec: import("./types").ServerWorkflow,
+) {
+  const label = `preset:${spec.presetId}`;
+  console.log(`[worker] job ${claimed.jobId} started (${server.name}, ${label})`);
+  const job = startJob({
+    id: claimed.jobId,
+    source: "upstream",
+    origin: server.name,
+    workflow: label,
+  });
+
+  try {
+    let imageFilename: string | undefined;
+    if (claimed.sourceImageBase64) {
+      const contentType = claimed.sourceImageContentType || "image/png";
+      const ext = contentType.split("/")[1] ?? "png";
+      imageFilename = await uploadImage(
+        COMFY_URL,
+        `input_${claimed.jobId}.${ext}`,
+        contentType,
+        Buffer.from(claimed.sourceImageBase64, "base64"),
+      );
+    }
+
+    const outputs = await runServerWorkflow(spec, imageFilename, (promptId) =>
+      markQueued(job, promptId),
+    );
+
+    const primary = outputs.find((output) => output.kind === "video") ?? outputs[0]!;
+    await uploadResult(server, claimed.jobId, primary.url);
+    await reportComplete(server, claimed.jobId);
+
+    completeJob(job, outputs);
+    console.log(`[worker] job ${claimed.jobId} completed`);
+  } catch (err) {
+    const reason = message(err);
+    console.error(`[worker] job ${claimed.jobId} failed: ${reason}`);
+    failJob(job, reason);
+    await reportFailure(server, claimed.jobId, reason);
   }
 }
 
@@ -253,13 +310,29 @@ export function startAgent(servers: UpstreamServer[]): void {
   running = true;
   void sendHeartbeats();
   heartbeatTimer = setInterval(() => void sendHeartbeats(), HEARTBEAT_INTERVAL_MS);
+  // Model/node-definition sync runs on its own clock and never blocks jobs:
+  // preset jobs are only assigned once the server sees the models as ready.
+  void syncWithUpstreams();
+  modelSyncTimer = setInterval(() => void syncWithUpstreams(), MODEL_SYNC_INTERVAL_MS);
   void pollLoop();
+}
+
+async function syncWithUpstreams() {
+  const servers = upstreams;
+  if (servers.length === 0) return;
+  const manifests = (await Promise.all(servers.map(fetchManifest))).filter(
+    (manifest): manifest is NonNullable<typeof manifest> => manifest !== null,
+  );
+  if (manifests.length > 0) await syncModels(manifests);
+  await reportObjectInfo(COMFY_URL, servers);
 }
 
 export function stopAgent(): void {
   running = false;
   if (heartbeatTimer) clearInterval(heartbeatTimer);
   heartbeatTimer = null;
+  if (modelSyncTimer) clearInterval(modelSyncTimer);
+  modelSyncTimer = null;
 }
 
 /**

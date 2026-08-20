@@ -5,7 +5,7 @@ import { COMFY_URL, JOB_TIMEOUT_MS, WORKFLOW_DIR } from "./config";
 import { loadSettings, saveSettings } from "./settings";
 import { applyOverrides, detectSlots, parseApiWorkflow, readNumber } from "./slots";
 import type { ApiWorkflow, Slot, SlotOverrides, WorkflowSlots } from "./slots";
-import type { RunOutput, RunParams } from "./types";
+import type { RunOutput, RunParams, ServerWorkflow } from "./types";
 
 export type LoadedWorkflow = {
   name: string;
@@ -258,6 +258,72 @@ export async function runWorkflow(
 ): Promise<RunOutput[]> {
   const loaded = await loadWorkflow(name);
   const promptId = await queuePrompt(COMFY_URL, applyParams(loaded, params));
+  onQueued?.(promptId);
+
+  const entry = await waitForPrompt(COMFY_URL, promptId, JOB_TIMEOUT_MS);
+
+  const failure = runFailure(entry);
+  if (failure) throw new Error(failure);
+
+  const outputs = collectOutputs(COMFY_URL, entry);
+  if (outputs.length === 0) {
+    throw new Error("run finished but produced no files — does the workflow have a save node?");
+  }
+  return outputs;
+}
+
+/**
+ * Placeholders a server-supplied workflow may carry (douga-workflow #127).
+ * Node ids differ per workflow, so the substitution points are marked in the
+ * JSON itself; this walks every node's inputs and swaps values, never touching
+ * the graph's structure.
+ *
+ * - "__INPUT_IMAGE__"   → the uploaded input image's filename
+ * - "__TRIGGER_WORDS__" → the preset's trigger words (empty when null)
+ * - "__SEED__"          → a random seed (number)
+ */
+function substitutePlaceholders(
+  workflow: ApiWorkflow,
+  imageFilename: string | undefined,
+  triggerWords: string | null,
+): void {
+  const seed = Math.floor(Math.random() * 2 ** 32);
+  const trigger = triggerWords ?? "";
+  for (const node of Object.values(workflow)) {
+    for (const [name, value] of Object.entries(node.inputs)) {
+      if (value === "__INPUT_IMAGE__") {
+        if (imageFilename) node.inputs[name] = imageFilename;
+      } else if (value === "__SEED__") {
+        node.inputs[name] = seed;
+      } else if (typeof value === "string" && value.includes("__TRIGGER_WORDS__")) {
+        // No joining commas or spaces added here; the JSON's author decides.
+        node.inputs[name] = value.replaceAll("__TRIGGER_WORDS__", trigger);
+      }
+    }
+  }
+}
+
+/**
+ * Runs a workflow the server shipped with the job. Same submit/wait/collect
+ * path as {@link runWorkflow}; only where the JSON comes from differs.
+ */
+export async function runServerWorkflow(
+  spec: ServerWorkflow,
+  imageFilename: string | undefined,
+  onQueued?: (promptId: string) => void,
+): Promise<RunOutput[]> {
+  let workflow: ApiWorkflow;
+  try {
+    workflow = parseApiWorkflow(JSON.parse(spec.workflowJson));
+  } catch (err) {
+    throw new Error(
+      `preset workflow is not a valid API-format workflow: ${err instanceof Error ? err.message : err}`,
+      { cause: err },
+    );
+  }
+  substitutePlaceholders(workflow, imageFilename, spec.triggerWords);
+
+  const promptId = await queuePrompt(COMFY_URL, workflow);
   onQueued?.(promptId);
 
   const entry = await waitForPrompt(COMFY_URL, promptId, JOB_TIMEOUT_MS);
