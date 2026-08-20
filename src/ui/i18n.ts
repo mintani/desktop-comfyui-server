@@ -218,6 +218,7 @@ const STRINGS = {
     ja: "{percent}% · {value}/{max} ステップ",
   },
   "jobs.node": { en: "node {node}", ja: "ノード {node}" },
+  "jobs.attempt": { en: "attempt {count}", ja: "試行 {count} 回目" },
   "jobs.interrupted": { en: "interrupted by a restart", ja: "再起動で中断されました" },
   "jobs.delete": { en: "Delete", ja: "削除" },
 

@@ -72,6 +72,12 @@ export function markQueued(job: JobRecord, promptId: string): void {
   persist();
 }
 
+/** Records that the job is on its `attempt`-th try, so the UI can say so. */
+export function noteAttempt(job: JobRecord, attempt: number): void {
+  job.attempts = attempt;
+  persist();
+}
+
 export function completeJob(job: JobRecord, outputs: RunOutput[]): void {
   job.state = "succeeded";
   job.outputs = outputs;

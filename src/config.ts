@@ -42,6 +42,14 @@ export const HEARTBEAT_INTERVAL_MS = Number(process.env.HEARTBEAT_INTERVAL_MS ??
 /** How long a single ComfyUI run may take before it is abandoned. */
 export const JOB_TIMEOUT_MS = Number(process.env.JOB_TIMEOUT_MS ?? "600000");
 
+/**
+ * Extra tries an upstream job gets on this machine before its failure is
+ * reported. A transient failure — a network blip, ComfyUI mid-restart — is
+ * cheaper to retry here than to bounce back through the job server.
+ */
+export const JOB_RETRIES = Number(process.env.JOB_RETRIES ?? "2");
+export const RETRY_DELAY_MS = Number(process.env.RETRY_DELAY_MS ?? "10000");
+
 export const AUTO_UPDATE = (process.env.AUTO_UPDATE ?? "false") !== "false";
 export const UPDATE_CHECK_INTERVAL_MS = Number(process.env.UPDATE_CHECK_INTERVAL_MS ?? "60000");
 
