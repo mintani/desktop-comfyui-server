@@ -339,6 +339,87 @@
                   Clear finished
                 </button>
               </div>
+
+              <!-- Narrowing and reshaping only — the history itself is what it
+                   is. The choices live in the page, not on the server. -->
+              <div class="filters">
+                <div
+                  class="segmented text"
+                  id="jobs-state"
+                  role="group"
+                  data-i18n-label="jobs.filterState"
+                >
+                  <button type="button" data-job-state="all" data-i18n="jobs.all">All</button>
+                  <button type="button" data-job-state="running" data-i18n="jobs.running">
+                    running
+                  </button>
+                  <button type="button" data-job-state="succeeded" data-i18n="jobs.succeeded">
+                    succeeded
+                  </button>
+                  <button type="button" data-job-state="failed" data-i18n="jobs.failed">
+                    failed
+                  </button>
+                </div>
+                <div
+                  class="segmented text"
+                  id="jobs-source"
+                  role="group"
+                  data-i18n-label="jobs.filterSource"
+                >
+                  <button type="button" data-job-source="all" data-i18n="jobs.all">All</button>
+                  <button type="button" data-job-source="ui" data-i18n="jobs.ui">UI</button>
+                  <button type="button" data-job-source="upstream" data-i18n="jobs.upstream">
+                    upstream
+                  </button>
+                </div>
+                <div
+                  class="segmented"
+                  id="jobs-view"
+                  role="group"
+                  data-i18n-label="jobs.filterView"
+                >
+                  <button
+                    type="button"
+                    data-job-view="list"
+                    data-i18n-title="jobs.listView"
+                    aria-pressed="true"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M4 6h16M4 12h16M4 18h16" />
+                    </svg>
+                    <span class="sr-only" data-i18n="jobs.listView">List</span>
+                  </button>
+                  <button
+                    type="button"
+                    data-job-view="gallery"
+                    data-i18n-title="jobs.galleryView"
+                    aria-pressed="false"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      aria-hidden="true"
+                    >
+                      <rect x="4" y="4" width="7" height="7" rx="1" />
+                      <rect x="13" y="4" width="7" height="7" rx="1" />
+                      <rect x="4" y="13" width="7" height="7" rx="1" />
+                      <rect x="13" y="13" width="7" height="7" rx="1" />
+                    </svg>
+                    <span class="sr-only" data-i18n="jobs.galleryView">Gallery</span>
+                  </button>
+                </div>
+              </div>
+
               <div id="jobs"></div>
             </section>
           </div>

@@ -85,7 +85,8 @@ details.
 
 **Generate** runs a workflow by hand: a form on one side, the run history on the
 other. Handy for checking a workflow does what you think before a job server
-starts sending work.
+starts sending work. The history narrows by state and by where the job came
+from, and flips into a gallery of everything the filtered runs produced.
 
 A run in flight carries a bar — the steps ComfyUI has done out of the steps it
 expects, and the node it is on — so a slow workflow can be told from a stuck one.
