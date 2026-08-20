@@ -7,7 +7,7 @@
  * into is left alone until they save or revert.
  */
 
-import { LANGS, lang, locale, onLangChange, setLang, t } from "./i18n";
+import { LANGS, isKey, lang, locale, onLangChange, setLang, t } from "./i18n";
 import type { Key, Lang } from "./i18n";
 
 type RunMode = "accepting" | "local" | "paused";
@@ -114,6 +114,8 @@ type State = {
   } | null;
   desktop: { autostart: boolean; closeAction: "tray" | "quit" };
   jobs: JobRecord[];
+  /** Ring of recent server-side events, oldest first; ids only ever grow. */
+  events: { id: number; at: number; kind: string; params: Record<string, string> }[];
 };
 
 const POLL_MS = 2000;
@@ -170,6 +172,8 @@ const nodes = {
   acceptNote: el("accept-note"),
   desktopAutostart: el<HTMLInputElement>("desktop-autostart"),
   desktopNote: el("desktop-note"),
+  notifyEnabled: el<HTMLInputElement>("notify-enabled"),
+  notifyNote: el("notify-note"),
 };
 
 function esc(value: unknown): string {
@@ -776,7 +780,10 @@ function openPopover(target: Popover | null): void {
     popover.panel.hidden = !open;
     popover.button.setAttribute("aria-expanded", String(open));
   }
-  if (target !== DESKTOP_POPOVER) setNote(nodes.desktopNote, "");
+  if (target !== DESKTOP_POPOVER) {
+    setNote(nodes.desktopNote, "");
+    setNote(nodes.notifyNote, "");
+  }
   if (target !== MODE_POPOVER) setNote(nodes.modeNote, "");
 }
 
@@ -901,6 +908,111 @@ async function saveDesktop(path: string, body: unknown): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Notifications — server-side events turned into OS notifications
+// ---------------------------------------------------------------------------
+
+const NOTIFY_KEY = "notify";
+const NOTIFY_SEEN_KEY = "notify-seen";
+
+function notifyOn(): boolean {
+  try {
+    return localStorage.getItem(NOTIFY_KEY) === "on";
+  } catch {
+    return false;
+  }
+}
+
+function storeNotify(on: boolean): void {
+  try {
+    localStorage.setItem(NOTIFY_KEY, on ? "on" : "off");
+  } catch {
+    // Private mode — the choice lasts for this tab only.
+  }
+}
+
+let notifySeen = (() => {
+  try {
+    return Number(localStorage.getItem(NOTIFY_SEEN_KEY) ?? "0") || 0;
+  } catch {
+    return 0;
+  }
+})();
+
+/** False until the first poll: its backlog predates this page, so it is noise. */
+let notifyPrimed = false;
+
+function rememberSeen(id: number): void {
+  notifySeen = id;
+  try {
+    localStorage.setItem(NOTIFY_SEEN_KEY, String(id));
+  } catch {
+    // Private mode — an old event may notify again after a reload.
+  }
+}
+
+function notifyGranted(): boolean {
+  return "Notification" in window && Notification.permission === "granted";
+}
+
+function syncNotify(state: State): void {
+  const newest = state.events.at(-1)?.id ?? 0;
+
+  if (!notifyPrimed) {
+    notifyPrimed = true;
+    if (newest > notifySeen) rememberSeen(newest);
+    return;
+  }
+  if (newest <= notifySeen) return;
+
+  const fresh = state.events.filter((event) => event.id > notifySeen);
+  // Advanced even while notifications are off, so turning them on later does
+  // not replay history.
+  rememberSeen(newest);
+  if (!notifyOn() || !notifyGranted()) return;
+
+  for (const event of fresh) {
+    const key = `notify.${event.kind}`;
+    // A kind this page has no words for is skipped rather than crashed on —
+    // the server can be newer than a cached page.
+    if (!isKey(key)) continue;
+    try {
+      new Notification(t(key, event.params), {
+        body: event.params["error"] ?? "",
+        tag: `dcs-${event.id}`,
+      });
+    } catch {
+      // The permission can be revoked between polls; nothing to be done.
+    }
+  }
+}
+
+/**
+ * Turning it on asks the browser there and then, so the permission prompt is
+ * the answer to a click rather than appearing out of nowhere.
+ */
+async function setNotify(on: boolean): Promise<void> {
+  if (!on) {
+    storeNotify(false);
+    setNote(nodes.notifyNote, "");
+    return;
+  }
+  if (!("Notification" in window)) {
+    nodes.notifyEnabled.checked = false;
+    setNote(nodes.notifyNote, t("notify.unsupported"), true);
+    return;
+  }
+  const permission =
+    Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
+  if (permission !== "granted") {
+    nodes.notifyEnabled.checked = false;
+    setNote(nodes.notifyNote, t("notify.blocked"), true);
+    return;
+  }
+  storeNotify(true);
+  setNote(nodes.notifyNote, "");
+}
+
+// ---------------------------------------------------------------------------
 // Run form
 // ---------------------------------------------------------------------------
 
@@ -970,6 +1082,7 @@ function render(state: State): void {
   syncMode(state);
   syncAccepting(state);
   syncDesktop(state);
+  syncNotify(state);
   syncForm(state);
 }
 
@@ -1385,6 +1498,8 @@ nodes.desktopAutostart.addEventListener("change", () => {
   void saveDesktop("/api/desktop", { autostart: nodes.desktopAutostart.checked });
 });
 
+nodes.notifyEnabled.addEventListener("change", () => void setNotify(nodes.notifyEnabled.checked));
+
 nodes.desktopPanel.addEventListener("click", (event) => {
   const choice = (event.target as HTMLElement).closest<HTMLElement>("[data-close-action]")?.dataset[
     "closeAction"
@@ -1423,6 +1538,9 @@ setInterval(() => {
     if (Number.isFinite(started)) span.textContent = formatDuration(Date.now() - started);
   }
 }, 1000);
+
+// A permission revoked since last time reads as "off", matching what happens.
+nodes.notifyEnabled.checked = notifyOn() && notifyGranted();
 
 applyTheme(currentTheme());
 setLang(lang());

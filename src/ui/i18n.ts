@@ -116,6 +116,35 @@ const STRINGS = {
   "desktop.saved": { en: "saved", ja: "保存しました" },
   "desktop.saveFailed": { en: "save failed", ja: "保存できませんでした" },
 
+  // Notifications — the sentence for each event kind the server records ------
+  "notify.label": { en: "Notifications", ja: "通知" },
+  "notify.enable": { en: "Notify about failures", ja: "失敗や切断を通知する" },
+  "notify.unsupported": {
+    en: "this browser cannot show notifications",
+    ja: "このブラウザは通知に対応していません",
+  },
+  "notify.blocked": {
+    en: "the browser refused — allow notifications for this site",
+    ja: "ブラウザに拒否されました。このサイトの通知を許可してください",
+  },
+  "notify.job-failed": { en: "Job failed: {workflow}", ja: "ジョブ失敗: {workflow}" },
+  "notify.upstream-down": {
+    en: "Job server not answering: {server}",
+    ja: "ジョブサーバー応答なし: {server}",
+  },
+  "notify.upstream-up": {
+    en: "Job server back: {server}",
+    ja: "ジョブサーバー復帰: {server}",
+  },
+  "notify.comfy-crashed": {
+    en: "ComfyUI crashed — restarting it",
+    ja: "ComfyUI がクラッシュしました。再起動します",
+  },
+  "notify.comfy-gave-up": {
+    en: "ComfyUI keeps crashing — gave up restarting",
+    ja: "ComfyUI がクラッシュを繰り返すため、再起動を諦めました",
+  },
+
   "nav.label": { en: "Sections", ja: "セクション" },
   "nav.workflows": { en: "Workflows", ja: "ワークフロー" },
   "nav.comfyui": { en: "ComfyUI", ja: "ComfyUI" },
@@ -332,6 +361,11 @@ const STRINGS = {
 } satisfies Record<string, Entry>;
 
 export type Key = keyof typeof STRINGS;
+
+/** Whether the table has words for `value` — for keys built at runtime. */
+export function isKey(value: string): value is Key {
+  return value in STRINGS;
+}
 
 const DEFAULT_LANG: Lang = LANGS[0].code;
 const STORAGE_KEY = "lang";

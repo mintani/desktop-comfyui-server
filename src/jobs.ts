@@ -9,6 +9,7 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import { JOBS_FILE } from "./config";
+import { pushEvent } from "./events";
 import type { JobRecord, JobSource, RunOutput } from "./types";
 
 const MAX_JOBS = 200;
@@ -83,6 +84,8 @@ export function failJob(job: JobRecord, error: string): void {
   job.error = error;
   job.finishedAt = Date.now();
   persist();
+  // Cut for a notification body, not for the record: `job.error` keeps it all.
+  pushEvent("job-failed", { workflow: job.workflow, error: error.slice(0, 200) });
 }
 
 export function listJobs(): JobRecord[] {
