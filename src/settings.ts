@@ -88,6 +88,11 @@ export type Settings = {
    * quietly start claiming again.
    */
   pauseUntil: number | null;
+  /**
+   * Outputs older than this many days are deleted by the sweep in
+   * `outputs.ts`. `0` — the default — means never delete anything.
+   */
+  outputCleanupDays: number;
   desktop: DesktopSettings;
 };
 
@@ -99,6 +104,7 @@ const EMPTY: Settings = {
   mode: "accepting",
   schedule: EMPTY_SCHEDULE,
   pauseUntil: null,
+  outputCleanupDays: 0,
   desktop: { autostart: false, closeAction: "tray" },
 };
 
@@ -170,6 +176,13 @@ function normaliseSchedule(raw: unknown): AcceptSchedule {
   };
 }
 
+/** Anything a day count cannot be — negative, NaN, absent — means "off". */
+export function normaliseCleanupDays(raw: unknown): number {
+  return typeof raw === "number" && Number.isFinite(raw) && raw >= 1
+    ? Math.min(3650, Math.floor(raw))
+    : 0;
+}
+
 function normaliseDesktop(raw: unknown): DesktopSettings {
   const value = (raw ?? {}) as Partial<DesktopSettings>;
   return {
@@ -192,6 +205,7 @@ function normalise(raw: unknown): Settings {
     mode: normaliseMode(value),
     schedule: normaliseSchedule(value.schedule),
     pauseUntil: typeof value.pauseUntil === "number" ? value.pauseUntil : null,
+    outputCleanupDays: normaliseCleanupDays(value.outputCleanupDays),
     desktop: normaliseDesktop(value.desktop),
   };
 }

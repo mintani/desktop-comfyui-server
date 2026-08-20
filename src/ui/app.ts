@@ -98,7 +98,9 @@ type State = {
     }[];
   };
   upstreams: UpstreamView[];
-  settings: { comfyDir: string; comfyCommand: string };
+  settings: { comfyDir: string; comfyCommand: string; outputCleanupDays: number };
+  /** ComfyUI's output folder as last scanned; null when there is none. */
+  outputs: { dir: string; files: number; bytes: number; scannedAt: number } | null;
   mode: RunMode;
   accepting: {
     accepting: boolean;
@@ -176,6 +178,12 @@ const nodes = {
   desktopNote: el("desktop-note"),
   notifyEnabled: el<HTMLInputElement>("notify-enabled"),
   notifyNote: el("notify-note"),
+  outputsDir: el("outputs-dir"),
+  outputsInfo: el("outputs-info"),
+  outputsDays: el<HTMLInputElement>("outputs-days"),
+  outputsAuto: el<HTMLInputElement>("outputs-auto"),
+  outputsTrim: el<HTMLButtonElement>("outputs-trim"),
+  outputsNote: el("outputs-note"),
 };
 
 function esc(value: unknown): string {
@@ -209,6 +217,12 @@ function progressPercent(progress: { value: number; max: number }): number {
 /** Bytes as gigabytes with one decimal, the unit VRAM is talked about in. */
 function gb(bytes: number): string {
   return (bytes / 1024 ** 3).toFixed(1);
+}
+
+/** "3.2 GB" or "410 MB", for sizes whose scale is not known in advance. */
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 ** 3) return `${gb(bytes)} GB`;
+  return `${Math.round(bytes / 1024 ** 2)} MB`;
 }
 
 /** Whole minutes still to go. Never zero: seconds left is still time left. */
@@ -768,6 +782,59 @@ function syncSettings(state: State): void {
 }
 
 // ---------------------------------------------------------------------------
+// Outputs — ComfyUI's output folder
+// ---------------------------------------------------------------------------
+
+function syncOutputs(state: State): void {
+  if (!state.outputs) {
+    nodes.outputsDir.textContent = "";
+    nodes.outputsInfo.textContent = t("outputs.none");
+    nodes.outputsTrim.disabled = true;
+  } else {
+    nodes.outputsDir.textContent = state.outputs.dir;
+    nodes.outputsInfo.textContent = t("outputs.count", {
+      files: state.outputs.files,
+      size: formatBytes(state.outputs.bytes),
+    });
+    nodes.outputsTrim.disabled = false;
+  }
+
+  // Like the schedule times: only the field being typed into is left alone.
+  if (document.activeElement !== nodes.outputsAuto) {
+    nodes.outputsAuto.value = String(state.settings.outputCleanupDays);
+  }
+}
+
+async function trimOutputsNow(): Promise<void> {
+  const days = Number(nodes.outputsDays.value);
+  if (!Number.isFinite(days) || days < 1) {
+    setNote(nodes.outputsNote, t("outputs.needDays"), true);
+    return;
+  }
+  if (!confirm(t("outputs.confirm", { days }))) return;
+
+  nodes.outputsTrim.disabled = true;
+  setNote(nodes.outputsNote, t("outputs.trimming"));
+  const result = await post<{ removedFiles: number; removedBytes: number }>("/api/outputs/trim", {
+    days,
+  });
+  nodes.outputsTrim.disabled = false;
+
+  if (!result.ok) {
+    setNote(nodes.outputsNote, result.error ?? t("outputs.trimFailed"), true);
+    return;
+  }
+  setNote(
+    nodes.outputsNote,
+    t("outputs.trimmed", {
+      files: result.data?.removedFiles ?? 0,
+      size: formatBytes(result.data?.removedBytes ?? 0),
+    }),
+  );
+  void poll();
+}
+
+// ---------------------------------------------------------------------------
 // Header menus
 // ---------------------------------------------------------------------------
 
@@ -1083,6 +1150,7 @@ function render(state: State): void {
   syncServers(state);
   renderJobs(state);
   syncSettings(state);
+  syncOutputs(state);
   syncMode(state);
   syncAccepting(state);
   syncDesktop(state);
@@ -1459,6 +1527,22 @@ async function toggleComfy(): Promise<void> {
 
 nodes.comfyPower.addEventListener("click", () => void toggleComfy());
 nodes.comfyPower2.addEventListener("click", () => void toggleComfy());
+
+nodes.outputsTrim.addEventListener("click", () => void trimOutputsNow());
+
+// Saved on change like the schedule: one number is not worth a Save button.
+nodes.outputsAuto.addEventListener("change", async () => {
+  const days = Number(nodes.outputsAuto.value);
+  const result = await post("/api/settings", {
+    outputCleanupDays: Number.isFinite(days) ? days : 0,
+  });
+  setNote(
+    nodes.outputsNote,
+    result.ok ? t("outputs.saved") : (result.error ?? t("comfy.saveFailed")),
+    !result.ok,
+  );
+  void poll();
+});
 
 nodes.desktopOpen.addEventListener("click", () => toggle(DESKTOP_POPOVER));
 nodes.modeOpen.addEventListener("click", () => toggle(MODE_POPOVER));

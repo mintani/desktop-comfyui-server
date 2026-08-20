@@ -13,12 +13,14 @@ import {
   removeJob,
   startJob,
 } from "../jobs";
+import { outputsSnapshot, rescanOutputs, trimOutputs } from "../outputs";
 import { latestProgress } from "../progress";
 import {
   RUN_MODES,
   hostFromUrl,
   loadSettings,
   newUpstreamId,
+  normaliseCleanupDays,
   publicUpstreams,
   saveSettings,
 } from "../settings";
@@ -58,7 +60,12 @@ async function handleState(): Promise<Response> {
     activeWorkflow: await activeWorkflowName(),
     agent: agentSnapshot(),
     upstreams: publicUpstreams(settings),
-    settings: { comfyDir: settings.comfyDir, comfyCommand: settings.comfyCommand },
+    settings: {
+      comfyDir: settings.comfyDir,
+      comfyCommand: settings.comfyCommand,
+      outputCleanupDays: settings.outputCleanupDays,
+    },
+    outputs: outputsSnapshot(),
     mode: settings.mode,
     accepting: acceptState(settings),
     progress: latestProgress(),
@@ -265,14 +272,43 @@ async function handleLink(req: Request): Promise<Response> {
 
 async function handleSettingsSave(req: Request): Promise<Response> {
   try {
-    const body = (await req.json()) as { comfyDir?: string; comfyCommand?: string };
+    const body = (await req.json()) as {
+      comfyDir?: string;
+      comfyCommand?: string;
+      outputCleanupDays?: unknown;
+    };
     const saved = await saveSettings({
       ...(body.comfyDir === undefined ? {} : { comfyDir: body.comfyDir.trim() }),
       ...(body.comfyCommand === undefined ? {} : { comfyCommand: body.comfyCommand.trim() }),
+      ...(body.outputCleanupDays === undefined
+        ? {}
+        : { outputCleanupDays: normaliseCleanupDays(body.outputCleanupDays) }),
     });
+    // A different directory means a different output folder to count.
+    if (body.comfyDir !== undefined) void rescanOutputs();
     return Response.json({
-      settings: { comfyDir: saved.comfyDir, comfyCommand: saved.comfyCommand },
+      settings: {
+        comfyDir: saved.comfyDir,
+        comfyCommand: saved.comfyCommand,
+        outputCleanupDays: saved.outputCleanupDays,
+      },
     });
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/**
+ * Delete outputs older than the given days, right now. The stored rule is the
+ * quiet version of this; the button wants its result in the response.
+ */
+async function handleOutputsTrim(req: Request): Promise<Response> {
+  try {
+    const { days } = (await req.json()) as { days?: unknown };
+    if (typeof days !== "number" || !Number.isFinite(days) || days < 1 || days > 3650) {
+      return fail("days must be a number between 1 and 3650");
+    }
+    return Response.json(await trimOutputs(Math.floor(days)));
   } catch (err) {
     return fail(err);
   }
@@ -571,6 +607,7 @@ export function startUi() {
       "/api/link": { POST: guarded(handleLink) },
 
       "/api/settings": { POST: guarded(handleSettingsSave) },
+      "/api/outputs/trim": { POST: guarded(handleOutputsTrim) },
       "/api/mode": { POST: guarded(handleMode) },
       "/api/accept/pause": { POST: guarded(handlePause) },
       "/api/accept/schedule": { POST: guarded(handleScheduleSave) },

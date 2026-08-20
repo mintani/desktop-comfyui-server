@@ -14,7 +14,8 @@ export type UiEventKind =
   | "upstream-down"
   | "upstream-up"
   | "comfy-crashed"
-  | "comfy-gave-up";
+  | "comfy-gave-up"
+  | "outputs-trimmed";
 
 export type UiEvent = {
   id: number;
