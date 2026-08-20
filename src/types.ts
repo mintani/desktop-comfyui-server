@@ -73,6 +73,17 @@ export type JobRecord = {
   interrupted?: boolean;
 };
 
+/**
+ * A workflow shipped inside the claim itself (douga-workflow #127). The JSON is
+ * API format; placeholders (`__INPUT_IMAGE__`, `__TRIGGER_WORDS__`, `__SEED__`)
+ * are substituted here before queueing.
+ */
+export type ServerWorkflow = {
+  presetId: string;
+  workflowJson: string;
+  triggerWords: string | null;
+};
+
 /** Job payload handed out by an upstream server's claim endpoint. */
 export type ClaimedJob = {
   jobId: string;
@@ -81,6 +92,9 @@ export type ClaimedJob = {
   sourceImageContentType: string;
   /** Optional per-job overrides; upstreams that don't send these get defaults. */
   params?: RunParams;
-  /** Workflow name to run. Falls back to the active workflow when absent. */
-  workflow?: string;
+  /**
+   * What to run. A string names a local workflow file; an object carries the
+   * workflow itself. Absent (or null) falls back to the active local workflow.
+   */
+  workflow?: string | ServerWorkflow | null;
 };

@@ -39,6 +39,9 @@ export const UI_HOSTNAME = process.env.UI_HOSTNAME ?? "127.0.0.1";
 export const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? "5000");
 export const HEARTBEAT_INTERVAL_MS = Number(process.env.HEARTBEAT_INTERVAL_MS ?? "30000");
 
+/** How often preset models and node definitions are synced with upstreams. */
+export const MODEL_SYNC_INTERVAL_MS = Number(process.env.MODEL_SYNC_INTERVAL_MS ?? "600000");
+
 /** How long a single ComfyUI run may take before it is abandoned. */
 export const JOB_TIMEOUT_MS = Number(process.env.JOB_TIMEOUT_MS ?? "600000");
 
