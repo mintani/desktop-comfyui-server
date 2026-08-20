@@ -6,6 +6,12 @@ name: Release
 # publish it. Running this by hand from the Actions tab instead builds the same
 # installers and leaves them as workflow artifacts, which is the way to try a
 # build without announcing one.
+#
+# The draft also carries the signed updater artifacts and the `latest.json`
+# installed apps poll (tauri-action writes it because tauri.conf.json turns
+# `createUpdaterArtifacts` on). Publishing the release is what makes
+# `releases/latest/download/latest.json` resolve — which is the moment every
+# installed app starts offering the update.
 on:
   push:
     branches: [main]
@@ -102,6 +108,11 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the updater artifacts. Installed apps refuse an update whose
+          # signature the pubkey in tauri.conf.json cannot verify, so a release
+          # built without these updates nobody.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           # Empty for a manual run: build the installers, create nothing.
           tagName: ${{ needs.version.outputs.bumped == 'true' && format('v{0}', needs.version.outputs.version) || '' }}
@@ -110,6 +121,9 @@ jobs:
           prerelease: false
           releaseBody: |
             Download `ComfyUI-Server_..._x64-setup.exe` and run it.
+
+            Already installed? The app offers this update itself once the
+            release is published — accept the dialog and it restarts updated.
 
             The installer is not code signed, so Windows will show
             "Windows protected your PC" — choose **More info → Run anyway**.

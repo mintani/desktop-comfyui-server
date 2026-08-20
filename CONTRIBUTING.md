@@ -36,14 +36,42 @@ along with `tsc --noEmit`, and compiles the Rust shell with clippy.
 
 ## Releasing
 
-A release is the version in `package.json`. Bump it together with
-`src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml` — the release workflow
-stops if the three disagree, since the installer filenames come from Tauri's
-copy — and merge that into `main`.
+### Versions
 
-GitHub Actions then builds the Windows installers and opens a **draft** release
-tagged `v<version>`; publish it when you are ready. Nothing is released by
-pushing a tag by hand any more.
+Versions are `MAJOR.MINOR.PATCH`. While the app is pre-1.0, a release with new
+features bumps MINOR (`0.1.2 → 0.2.0`) and a fix-only release bumps PATCH
+(`0.2.0 → 0.2.1`). **`1.0.0` is reserved for the first release that ships
+premium features** — nothing before that milestone bumps MAJOR, however large.
+
+### Cutting a release
+
+A release is the version in `package.json`. Run
+
+```
+bun run bump 0.2.0
+```
+
+to write the new version into `package.json`, `src-tauri/tauri.conf.json` and
+`src-tauri/Cargo.toml` in one go — the release workflow stops if the three
+disagree, since the installer filenames come from Tauri's copy. Commit that on
+`dev` (`chore(release): 0.2.0`), then merge `dev` into `main`.
+
+GitHub Actions then builds the Windows installers, signs the updater artifacts
+and opens a **draft** release tagged `v<version>`, with the `latest.json` that
+installed apps poll. Publishing the draft is the switch: from that moment every
+installed app offers the update — at launch, daily, and from **Check for
+updates** in the tray — and restarts into the new version. Nothing is released
+by pushing a tag by hand any more.
 
 To try a build without announcing one, run the Release workflow from the Actions
 tab. It builds the same installers and leaves them as workflow artifacts.
+
+### The updater key
+
+Updates are verified against a minisign key pair: the public key sits in
+`tauri.conf.json`, the private key and its password live in the
+`TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` Actions
+secrets. **Losing the private key strands every installed app** — they will
+refuse anything signed with a replacement, and only a hand-downloaded installer
+gets them back. Keep a copy of the key and its password somewhere safe outside
+this repository, and never commit them.
