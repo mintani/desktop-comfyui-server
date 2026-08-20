@@ -472,6 +472,36 @@ function slotTags(summary: WorkflowSummary): string {
   return `<div class="slots">${tags.join("")}</div>`;
 }
 
+/**
+ * The last check of each workflow against the running ComfyUI, held here the
+ * way server test results are held on their rows. Nothing until one is run.
+ */
+type WorkflowCheck = { checking?: boolean; ok?: boolean; problems?: string[]; error?: string };
+const workflowChecks = new Map<string, WorkflowCheck>();
+
+function checkResultFor(name: string): string {
+  const check = workflowChecks.get(name);
+  if (!check) return "";
+  if (check.checking) return `<p class="meta">${t("workflows.checking")}</p>`;
+  if (check.error) return `<p class="error">${esc(check.error)}</p>`;
+  if (check.ok) return `<p class="meta">${t("workflows.checkOk")}</p>`;
+  return (check.problems ?? []).map((problem) => `<p class="error">${esc(problem)}</p>`).join("");
+}
+
+async function runWorkflowCheck(name: string): Promise<void> {
+  workflowChecks.set(name, { checking: true });
+  if (latestState) renderWorkflows(latestState);
+
+  const result = await post<{ ok: boolean; problems: string[] }>("/api/workflows/check", { name });
+  workflowChecks.set(
+    name,
+    result.ok
+      ? { ok: result.data?.ok ?? false, problems: result.data?.problems ?? [] }
+      : { error: result.error ?? t("workflows.checkFailed") },
+  );
+  if (latestState) renderWorkflows(latestState);
+}
+
 function renderWorkflows(state: State): void {
   nodes.workflowDir.textContent = t("workflows.dir", { dir: state.workflowDir });
 
@@ -489,6 +519,11 @@ function renderWorkflows(state: State): void {
           ${active ? `<span class="state"><span class="dot run"></span>${t("workflows.active")}</span>` : ""}
           <span class="spacer"></span>
           ${
+            summary.valid
+              ? `<button type="button" class="ghost" data-check-workflow="${esc(summary.name)}">${t("workflows.check")}</button>`
+              : ""
+          }
+          ${
             active || !summary.valid
               ? ""
               : `<button type="button" class="ghost" data-activate="${esc(summary.name)}">${t("workflows.makeActive")}</button>`
@@ -504,6 +539,7 @@ function renderWorkflows(state: State): void {
         ${head}
         <p class="meta">${t("workflows.nodes", { count: summary.nodeCount ?? 0 })}</p>
         ${slotTags(summary)}
+        ${checkResultFor(summary.name)}
       </div>`;
     })
     .join("");
@@ -1403,6 +1439,12 @@ nodes.uploadForm.addEventListener("submit", async (event) => {
 
 nodes.workflows.addEventListener("click", async (event) => {
   const target = event.target as HTMLElement;
+
+  const check = target.closest<HTMLElement>("[data-check-workflow]")?.dataset["checkWorkflow"];
+  if (check) {
+    void runWorkflowCheck(check);
+    return;
+  }
 
   const activate = target.closest<HTMLElement>("[data-activate]")?.dataset["activate"];
   if (activate) {

@@ -36,6 +36,7 @@ import {
   setActiveWorkflow,
 } from "../workflow";
 import { claimLinkCode, testUpstream } from "../upstream";
+import { checkWorkflow } from "../validate";
 import { authorise } from "./guard";
 import index from "./index.html";
 import type { AcceptSchedule, RunMode, UpstreamConfig } from "../settings";
@@ -111,6 +112,17 @@ async function handleWorkflowUpload(req: Request): Promise<Response> {
 
     const summary = await saveWorkflowFile(name, await file.text());
     return Response.json({ workflow: summary });
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/** Compare one workflow against the running ComfyUI — see `validate.ts`. */
+async function handleWorkflowCheck(req: Request): Promise<Response> {
+  try {
+    const { name } = (await req.json()) as { name?: string };
+    if (!name) return fail("name is required");
+    return Response.json(await checkWorkflow(name));
   } catch (err) {
     return fail(err);
   }
@@ -600,6 +612,7 @@ export function startUi() {
       "/api/workflows/active": { POST: guarded(handleSetActive) },
       "/api/workflows/reload": { POST: guarded(handleReload) },
       "/api/workflows/upload": { POST: guarded(handleWorkflowUpload) },
+      "/api/workflows/check": { POST: guarded(handleWorkflowCheck) },
       "/api/workflows/delete": { POST: guarded(handleWorkflowDelete) },
 
       "/api/upstreams": { POST: guarded(handleUpstreamsSave) },
