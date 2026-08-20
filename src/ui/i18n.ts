@@ -223,6 +223,20 @@ const STRINGS = {
   },
   "jobs.node": { en: "node {node}", ja: "ノード {node}" },
   "jobs.attempt": { en: "attempt {count}", ja: "試行 {count} 回目" },
+  "jobs.all": { en: "All", ja: "すべて" },
+  "jobs.filterState": { en: "State", ja: "状態" },
+  "jobs.filterSource": { en: "Source", ja: "発生元" },
+  "jobs.filterView": { en: "View", ja: "表示" },
+  "jobs.listView": { en: "List", ja: "リスト" },
+  "jobs.galleryView": { en: "Gallery", ja: "ギャラリー" },
+  "jobs.noMatch": {
+    en: "Nothing in the history matches the filter.",
+    ja: "条件に合う履歴はありません。",
+  },
+  "jobs.noMedia": {
+    en: "No images or videos in the filtered runs yet.",
+    ja: "条件に合う画像・動画はまだありません。",
+  },
   "jobs.interrupted": { en: "interrupted by a restart", ja: "再起動で中断されました" },
   "jobs.delete": { en: "Delete", ja: "削除" },
 

@@ -760,12 +760,62 @@ function jobEntry(job: JobRecord, withDelete: boolean, progress: State["progress
   </div>`;
 }
 
+// Page-local: the history itself is what it is, only its reading is chosen.
+type JobStateFilter = "all" | JobRecord["state"];
+type JobSourceFilter = "all" | JobRecord["source"];
+type JobsView = "list" | "gallery";
+
+let jobStateFilter: JobStateFilter = "all";
+let jobSourceFilter: JobSourceFilter = "all";
+let jobsView: JobsView = "list";
+
+/**
+ * Every image and video the filtered runs produced, newest first, each cell
+ * opening (or playing) the file itself. Failures and files that are neither
+ * are the list view's business.
+ */
+function galleryHtml(jobs: JobRecord[]): string {
+  const cells: string[] = [];
+  for (const job of jobs) {
+    for (const output of job.outputs ?? []) {
+      const url = outputUrl(output);
+      const name = esc(output.filename);
+      const caption = `${esc(job.workflow)} · ${formatTime(job.startedAt)}`;
+      if (output.kind === "image") {
+        cells.push(
+          `<a class="cell" href="${url}" target="_blank" rel="noreferrer" title="${caption}">` +
+            `<img src="${url}" alt="${name}" loading="lazy" /></a>`,
+        );
+      } else if (output.kind === "video") {
+        cells.push(
+          `<div class="cell" title="${caption}">` +
+            `<video src="${url}" controls preload="metadata" title="${name}"></video></div>`,
+        );
+      }
+    }
+  }
+  if (cells.length === 0) return `<p class="empty">${t("jobs.noMedia")}</p>`;
+  return `<div class="gallery">${cells.join("")}</div>`;
+}
+
 function renderJobs(state: State): void {
-  if (state.jobs.length === 0) {
-    renderIfChanged(nodes.jobs, "jobs", `<p class="empty">${t("jobs.empty")}</p>`);
+  const jobs = state.jobs.filter(
+    (job) =>
+      (jobStateFilter === "all" || job.state === jobStateFilter) &&
+      (jobSourceFilter === "all" || job.source === jobSourceFilter),
+  );
+
+  if (jobsView === "gallery") {
+    renderIfChanged(nodes.jobs, "jobs", galleryHtml(jobs));
     return;
   }
-  const html = state.jobs.map((job) => jobEntry(job, true, state.progress)).join("");
+  if (jobs.length === 0) {
+    // An empty history and a filter that matched nothing read differently.
+    const text = state.jobs.length === 0 ? t("jobs.empty") : t("jobs.noMatch");
+    renderIfChanged(nodes.jobs, "jobs", `<p class="empty">${text}</p>`);
+    return;
+  }
+  const html = jobs.map((job) => jobEntry(job, true, state.progress)).join("");
   renderIfChanged(nodes.jobs, "jobs", `<div class="ledger">${html}</div>`);
 }
 
@@ -1492,6 +1542,44 @@ nodes.jobs.addEventListener("click", async (event) => {
   lastHtml.delete("jobs");
   void poll();
 });
+
+function syncJobFilterButtons(): void {
+  const groups: [attribute: string, current: string][] = [
+    ["data-job-state", jobStateFilter],
+    ["data-job-source", jobSourceFilter],
+    ["data-job-view", jobsView],
+  ];
+  for (const [attribute, current] of groups) {
+    for (const button of document.querySelectorAll<HTMLElement>(`[${attribute}]`)) {
+      button.setAttribute("aria-pressed", String(button.getAttribute(attribute) === current));
+    }
+  }
+}
+
+/** The three groups differ only in which variable a click sets. */
+function wireJobFilter(id: string, attribute: string, apply: (value: string) => void): void {
+  el(id).addEventListener("click", (event) => {
+    const value = (event.target as HTMLElement)
+      .closest<HTMLElement>(`[${attribute}]`)
+      ?.getAttribute(attribute);
+    if (!value) return;
+    apply(value);
+    syncJobFilterButtons();
+    if (latestState) renderJobs(latestState);
+  });
+}
+
+wireJobFilter("jobs-state", "data-job-state", (value) => {
+  jobStateFilter = value as JobStateFilter;
+});
+wireJobFilter("jobs-source", "data-job-source", (value) => {
+  jobSourceFilter = value as JobSourceFilter;
+});
+wireJobFilter("jobs-view", "data-job-view", (value) => {
+  jobsView = value as JobsView;
+});
+
+syncJobFilterButtons();
 
 nodes.settingsForm.addEventListener("input", () => {
   settingsDirty = true;
