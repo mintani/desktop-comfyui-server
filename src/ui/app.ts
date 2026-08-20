@@ -115,7 +115,7 @@ type State = {
 };
 
 const POLL_MS = 2000;
-const PAGES = ["settings", "generate"] as const;
+const PAGES = ["workflows", "comfyui", "servers", "accepting", "generate"] as const;
 type Page = (typeof PAGES)[number];
 
 function el<T extends HTMLElement>(id: string): T {
@@ -288,10 +288,13 @@ function setNote(target: HTMLElement, text: string, isError = false): void {
 // Pages
 // ---------------------------------------------------------------------------
 
-/** Settings is the landing page; running a workflow by hand is the sideline. */
+/**
+ * Workflows is the landing tab; running a workflow by hand is the sideline.
+ * Any hash naming no tab lands there too — the old `#/settings` included.
+ */
 function currentPage(): Page {
   const hash = location.hash.replace(/^#\/?/, "");
-  return (PAGES as readonly string[]).includes(hash) ? (hash as Page) : "settings";
+  return (PAGES as readonly string[]).includes(hash) ? (hash as Page) : "workflows";
 }
 
 function showPage(): void {
