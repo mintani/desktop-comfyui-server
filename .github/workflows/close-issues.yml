@@ -5,19 +5,25 @@ name: Close issues
 # rather than work. Every pull request here lands on `dev`, so this does what
 # GitHub would have done if `dev` were the default.
 #
-# `pull_request_target`, not `pull_request`: a pull request from a fork gets a
-# read-only token, which cannot close anything. Nothing from the pull request is
-# checked out or run here, so running in the base context brings no risk.
+# `pull_request`, not `pull_request_target`: the target event takes its
+# workflow file from the default branch, and this file lives only on `dev`, so
+# as a target workflow it never fired. The plain event reads the file from the
+# pull request's merge result, which has it as soon as `dev` does. The price is
+# pull requests from forks — their read-only token cannot close anything — and
+# the `if` below skips those rather than failing them.
 on:
-  pull_request_target:
+  pull_request:
     types: [closed]
     branches: [dev]
 
 jobs:
   close:
     name: Close what it answers
-    # Closing a pull request without merging it answers nothing.
-    if: github.event.pull_request.merged == true
+    # Closing a pull request without merging it answers nothing, and a fork's
+    # read-only token could not close anything anyway.
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
