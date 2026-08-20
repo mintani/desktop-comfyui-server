@@ -64,7 +64,7 @@ function message(err: unknown): string {
 async function sendHeartbeats() {
   const status = await refreshStatus();
   // Which preset models this host holds, verified. The server assigns preset
-  // jobs only to hosts whose set covers the preset (douga-workflow #127).
+  // jobs only to hosts whose set covers the preset.
   const payload = { ...status, readyModels: getReadyModels() };
 
   await Promise.all(
@@ -105,7 +105,7 @@ async function claimNext(): Promise<{ server: UpstreamServer; job: ClaimedJob } 
 }
 
 async function processJob(server: UpstreamServer, claimed: ClaimedJob) {
-  // A workflow object rides inside the claim (douga-workflow #127): run that,
+  // A workflow object rides inside the claim: run that,
   // not a local file. Strings and absence keep the existing local-file path.
   if (claimed.workflow && typeof claimed.workflow === "object") {
     await processServerWorkflowJob(server, claimed, claimed.workflow);
