@@ -190,10 +190,10 @@ async function handleUpstreamTest(req: Request): Promise<Response> {
     const secret = (input.secret ?? "").trim() || stored?.secret || "";
     if (!secret) return fail("a secret is needed");
 
-    const { comfyStatus, queueRunning, queuePending } = latestStatus();
+    const { comfyStatus, queueRunning, queuePending, gpu } = latestStatus();
     const result = await testUpstream(
       { name: url, url, hostId, secret },
-      { comfyStatus, queueRunning, queuePending },
+      { comfyStatus, queueRunning, queuePending, gpu },
     );
     return Response.json(result);
   } catch (err) {

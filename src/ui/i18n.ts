@@ -132,6 +132,7 @@ const STRINGS = {
   "vitals.process": { en: "process", ja: "プロセス" },
   "vitals.access": { en: "access", ja: "アクセス" },
   "vitals.work": { en: "work", ja: "受付" },
+  "vitals.vram": { en: "VRAM", ja: "VRAM" },
   "vitals.progress": { en: "progress", ja: "進捗" },
   "vitals.tokenNeeded": {
     en: "open this page as ?token=<UI_TOKEN>",
