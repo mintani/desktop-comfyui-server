@@ -144,6 +144,10 @@ const STRINGS = {
     en: "ComfyUI keeps crashing — gave up restarting",
     ja: "ComfyUI がクラッシュを繰り返すため、再起動を諦めました",
   },
+  "notify.outputs-trimmed": {
+    en: "Old outputs deleted: {files} files ({size})",
+    ja: "古い出力を削除しました: {files} ファイル（{size}）",
+  },
 
   "nav.label": { en: "Sections", ja: "セクション" },
   "nav.workflows": { en: "Workflows", ja: "ワークフロー" },
@@ -289,6 +293,32 @@ const STRINGS = {
   },
   "process.startedAt": { en: "started {time} · pid {pid}", ja: "{time} に起動 · pid {pid}" },
   "process.foreign": { en: "not started from here", ja: "ここからは起動していません" },
+
+  // ComfyUI's output folder --------------------------------------------------
+  "outputs.title": { en: "Outputs", ja: "出力ファイル" },
+  "outputs.none": {
+    en: "No output folder under the ComfyUI directory yet.",
+    ja: "ComfyUI ディレクトリの下に output フォルダがまだありません。",
+  },
+  "outputs.count": { en: "{files} files · {size}", ja: "{files} ファイル · {size}" },
+  "outputs.olderThan": { en: "Older than (days)", ja: "何日より古いか" },
+  "outputs.auto": {
+    en: "Auto-delete after (days, 0 = off)",
+    ja: "自動削除する日数（0 = オフ）",
+  },
+  "outputs.trim": { en: "Delete old outputs", ja: "古い出力を削除" },
+  "outputs.confirm": {
+    en: "Delete outputs older than {days} days? The files are removed from disk.",
+    ja: "{days} 日より古い出力を削除しますか？ディスクからファイルが消えます。",
+  },
+  "outputs.needDays": { en: "enter how many days", ja: "日数を入力してください" },
+  "outputs.trimming": { en: "deleting…", ja: "削除中…" },
+  "outputs.trimFailed": { en: "delete failed", ja: "削除できませんでした" },
+  "outputs.trimmed": {
+    en: "removed {files} files ({size})",
+    ja: "{files} ファイル（{size}）を削除しました",
+  },
+  "outputs.saved": { en: "saved", ja: "保存しました" },
 
   // Upstream servers --------------------------------------------------------
   "servers.title": { en: "Upstream servers", ja: "上流サーバー" },

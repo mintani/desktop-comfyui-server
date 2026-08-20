@@ -415,6 +415,30 @@
             </div>
             <div id="comfy-process"></div>
           </section>
+
+          <!-- What ComfyUI's output folder holds. Nothing in ComfyUI ever
+               deletes an output, so the disk fills quietly without this. -->
+          <section class="panel">
+            <div class="panel-head"><h2 data-i18n="outputs.title">Outputs</h2></div>
+            <p class="mono muted" id="outputs-dir"></p>
+            <p class="muted" id="outputs-info"></p>
+            <div class="row">
+              <label class="field">
+                <span data-i18n="outputs.olderThan">Older than (days)</span>
+                <input type="number" id="outputs-days" min="1" value="30" />
+              </label>
+              <label class="field">
+                <span data-i18n="outputs.auto">Auto-delete after (days, 0 = off)</span>
+                <input type="number" id="outputs-auto" min="0" />
+              </label>
+            </div>
+            <div class="actions">
+              <button type="button" class="ghost danger" id="outputs-trim" data-i18n="outputs.trim">
+                Delete old outputs
+              </button>
+              <p class="muted" id="outputs-note"></p>
+            </div>
+          </section>
         </section>
 
         <section class="page" data-page="servers" hidden>

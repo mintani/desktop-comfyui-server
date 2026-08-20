@@ -72,7 +72,9 @@ done with.
 command to run there — and starts and stops it, with the tail of its output so
 a wrong command explains itself. A ComfyUI started here that crashes is started
 again on its own; three crashes in a row right after starting read as a broken
-command, so it stops trying and says why in the log.
+command, so it stops trying and says why in the log. An *Outputs* panel shows
+how much disk ComfyUI's output folder holds, with a button — and an optional
+standing rule — that deletes files older than a chosen number of days.
 
 **Servers** attaches job servers: link one with a code from its own UI, or fill
 a row in by hand; reorder and disable them here too. The order is the priority.
