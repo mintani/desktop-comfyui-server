@@ -1,9 +1,22 @@
 export type ComfyStatus = "available" | "busy" | "unavailable";
 
+/**
+ * The GPU as ComfyUI reports it, in bytes. Read through ComfyUI rather than
+ * from this machine, so a remote `COMFY_URL` shows the GPU actually doing the
+ * work.
+ */
+export type GpuStatus = {
+  name: string;
+  vramTotal: number;
+  vramFree: number;
+};
+
 export type ComfyStatusResult = {
   comfyStatus: ComfyStatus;
   queueRunning: number;
   queuePending: number;
+  /** `null` when ComfyUI is unreachable or reported no GPU device. */
+  gpu: GpuStatus | null;
 };
 
 export type OutputKind = "image" | "video" | "audio" | "file";

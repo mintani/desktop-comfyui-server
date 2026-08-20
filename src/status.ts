@@ -10,6 +10,7 @@ let latest: ComfyStatusResult = {
   comfyStatus: "unavailable",
   queueRunning: 0,
   queuePending: 0,
+  gpu: null,
 };
 let checkedAt = 0;
 

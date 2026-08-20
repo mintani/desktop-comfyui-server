@@ -69,6 +69,8 @@ type State = {
     comfyStatus: "available" | "busy" | "unavailable";
     queueRunning: number;
     queuePending: number;
+    /** VRAM in bytes, as ComfyUI reports its GPU; null without one. */
+    gpu: { name: string; vramTotal: number; vramFree: number } | null;
     checkedAt: number;
   };
   comfyProcess: {
@@ -196,6 +198,11 @@ function formatTime(ms: number): string {
 /** Whole percent, clamped — a step past the max would otherwise overflow the bar. */
 function progressPercent(progress: { value: number; max: number }): number {
   return Math.min(100, Math.max(0, Math.round((progress.value / progress.max) * 100)));
+}
+
+/** Bytes as gigabytes with one decimal, the unit VRAM is talked about in. */
+function gb(bytes: number): string {
+  return (bytes / 1024 ** 3).toFixed(1);
 }
 
 /** Whole minutes still to go. Never zero: seconds left is still time left. */
@@ -347,11 +354,27 @@ function renderVitals(state: State): void {
     chip(t("vitals.comfy"), esc(comfyStatusLabel(comfy.comfyStatus)), tone),
     chip(t("vitals.running"), pad(comfy.queueRunning)),
     chip(t("vitals.pending"), pad(comfy.queuePending)),
+  ];
+
+  // The GPU is what this machine lends out, so its headroom belongs up here.
+  // The dot only appears when the free VRAM is running out.
+  if (comfy.gpu) {
+    const low = comfy.gpu.vramFree / comfy.gpu.vramTotal < 0.1;
+    chips.push(
+      chip(
+        t("vitals.vram"),
+        `${gb(comfy.gpu.vramTotal - comfy.gpu.vramFree)}/${gb(comfy.gpu.vramTotal)} GB`,
+        low ? "warn" : undefined,
+      ),
+    );
+  }
+
+  chips.push(
     total === 0
       ? chip(t("vitals.agent"), t("vitals.standalone"))
       : chip(t("vitals.agent"), `${pad(healthy)}/${pad(total)}`, agentTone),
     chip(t("vitals.work"), work.label, work.tone),
-  ];
+  );
 
   if (state.progress && state.progress.max > 0) {
     chips.push(chip(t("vitals.progress"), `${progressPercent(state.progress)}%`, "run"));
