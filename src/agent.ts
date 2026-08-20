@@ -8,6 +8,7 @@ import {
   POLL_INTERVAL_MS,
   UPDATE_CHECK_INTERVAL_MS,
 } from "./config";
+import { pushEvent } from "./events";
 import { completeJob, failJob, markQueued, startJob } from "./jobs";
 import { latestStatus, refreshStatus } from "./status";
 import { RESTART_EXIT_CODE, remoteHasUpdate } from "./updater";
@@ -60,12 +61,17 @@ async function sendHeartbeats() {
 
   await Promise.all(
     upstreams.map(async (server) => {
+      // What the last beat said, so only a change of state is announced.
+      const was = heartbeats.get(server.name)?.ok;
+
       const ack = await sendHeartbeat(server, status);
       if (!ack) {
         heartbeats.set(server.name, { ok: false, at: Date.now() });
+        if (was !== false) pushEvent("upstream-down", { server: server.name });
         return;
       }
       heartbeats.set(server.name, { ok: true, at: Date.now(), pendingJobs: ack.pendingJobs });
+      if (was === false) pushEvent("upstream-up", { server: server.name });
       const backlog =
         ack.pendingJobs === undefined ? "" : ` | upstream queue: ${ack.pendingJobs} waiting`;
       console.log(

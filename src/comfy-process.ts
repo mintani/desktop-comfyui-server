@@ -19,6 +19,7 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { pushEvent } from "./events";
 import { loadSettings } from "./settings";
 
 export type ComfyProcessState = {
@@ -182,10 +183,12 @@ function maybeRestart(uptimeMs: number): void {
     wanted = false;
     lastError = "ComfyUI keeps crashing right after starting — not restarting, check the log";
     note(`— ${lastError}`);
+    pushEvent("comfy-gave-up");
     return;
   }
 
   note(`— restarting in ${RESTART_DELAY_MS / 1000} s (crash ${fastFails}/${MAX_FAST_FAILS})`);
+  pushEvent("comfy-crashed");
   restartTimer = setTimeout(() => {
     restartTimer = null;
     void restart();

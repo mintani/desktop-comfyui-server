@@ -3,6 +3,7 @@ import { agentSnapshot, applyUpstreamChange } from "../agent";
 import { interrupt, uploadImage, viewUrl } from "../comfy";
 import { comfyProcessState, startComfy, stopComfy } from "../comfy-process";
 import { COMFY_URL, UI_HOSTNAME, UI_PORT, UI_TOKEN, WORKFLOW_DIR } from "../config";
+import { listEvents } from "../events";
 import {
   clearFinishedJobs,
   completeJob,
@@ -63,6 +64,7 @@ async function handleState(): Promise<Response> {
     progress: latestProgress(),
     desktop: settings.desktop,
     jobs: listJobs(),
+    events: listEvents(),
   });
 }
 
