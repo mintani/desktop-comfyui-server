@@ -273,7 +273,7 @@ export async function runWorkflow(
 }
 
 /**
- * Placeholders a server-supplied workflow may carry (douga-workflow #127).
+ * Placeholders a server-supplied workflow may carry.
  * Node ids differ per workflow, so the substitution points are marked in the
  * JSON itself; this walks every node's inputs and swaps values, never touching
  * the graph's structure.
