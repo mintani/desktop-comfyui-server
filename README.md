@@ -37,6 +37,12 @@ fetches WebView2 if the machine does not already have it.
 You also need a [ComfyUI](https://github.com/comfyanonymous/ComfyUI) install —
 the app runs yours, it does not ship one.
 
+Installing is a one-time job: the app checks this repository's releases when it
+starts and once a day after that, asks before installing anything, and restarts
+into the new version. **Check for updates** in the tray menu does the same on
+the spot. Updates are signed, and the app refuses one whose signature does not
+verify.
+
 Settings, job history and uploaded workflows go to
 `%APPDATA%\desktop-comfyui-server`.
 
