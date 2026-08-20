@@ -7,7 +7,7 @@
  * into is left alone until they save or revert.
  */
 
-import { LANGS, lang, locale, onLangChange, setLang, t } from "./i18n";
+import { LANGS, isKey, lang, locale, onLangChange, setLang, t } from "./i18n";
 import type { Key, Lang } from "./i18n";
 
 type RunMode = "accepting" | "local" | "paused";
@@ -51,6 +51,8 @@ type JobRecord = {
   promptId?: string;
   outputs?: RunOutput[];
   error?: string;
+  /** Tries this job has had on this machine; absent means the first. */
+  attempts?: number;
   interrupted?: boolean;
 };
 
@@ -69,6 +71,8 @@ type State = {
     comfyStatus: "available" | "busy" | "unavailable";
     queueRunning: number;
     queuePending: number;
+    /** VRAM in bytes, as ComfyUI reports its GPU; null without one. */
+    gpu: { name: string; vramTotal: number; vramFree: number } | null;
     checkedAt: number;
   };
   comfyProcess: {
@@ -94,14 +98,32 @@ type State = {
     }[];
   };
   upstreams: UpstreamView[];
-  settings: { comfyDir: string; comfyCommand: string };
+  settings: { comfyDir: string; comfyCommand: string; outputCleanupDays: number };
+  /** ComfyUI's output folder as last scanned; null when there is none. */
+  outputs: { dir: string; files: number; bytes: number; scannedAt: number } | null;
   mode: RunMode;
+  accepting: {
+    accepting: boolean;
+    blockedBy: "mode" | "paused" | "schedule" | null;
+    pausedUntil: number | null;
+    schedule: { enabled: boolean; from: string; to: string };
+  };
+  /** How far the run in flight has got, or null when nothing is reporting. */
+  progress: {
+    promptId: string;
+    value: number;
+    max: number;
+    node: string | null;
+    at: number;
+  } | null;
   desktop: { autostart: boolean; closeAction: "tray" | "quit" };
   jobs: JobRecord[];
+  /** Ring of recent server-side events, oldest first; ids only ever grow. */
+  events: { id: number; at: number; kind: string; params: Record<string, string> }[];
 };
 
 const POLL_MS = 2000;
-const PAGES = ["settings", "generate"] as const;
+const PAGES = ["workflows", "comfyui", "servers", "accepting", "generate"] as const;
 type Page = (typeof PAGES)[number];
 
 function el<T extends HTMLElement>(id: string): T {
@@ -120,6 +142,9 @@ const nodes = {
   workflowDir: el("workflow-dir"),
   servers: el("servers"),
   serversNote: el("servers-note"),
+  linkUrl: el<HTMLInputElement>("link-url"),
+  linkCode: el<HTMLInputElement>("link-code"),
+  linkNote: el("link-note"),
   jobs: el("jobs"),
   form: el<HTMLFormElement>("run-form"),
   select: el<HTMLSelectElement>("run-workflow"),
@@ -141,9 +166,24 @@ const nodes = {
   modePanel: el("mode-panel"),
   modeDot: el("mode-dot"),
   modeLabel: el("mode-label"),
+  modeGate: el("mode-gate"),
   modeNote: el("mode-note"),
+  acceptPause: el("accept-pause"),
+  acceptPauseState: el("accept-pause-state"),
+  acceptEnabled: el<HTMLInputElement>("accept-enabled"),
+  acceptFrom: el<HTMLInputElement>("accept-from"),
+  acceptTo: el<HTMLInputElement>("accept-to"),
+  acceptNote: el("accept-note"),
   desktopAutostart: el<HTMLInputElement>("desktop-autostart"),
   desktopNote: el("desktop-note"),
+  notifyEnabled: el<HTMLInputElement>("notify-enabled"),
+  notifyNote: el("notify-note"),
+  outputsDir: el("outputs-dir"),
+  outputsInfo: el("outputs-info"),
+  outputsDays: el<HTMLInputElement>("outputs-days"),
+  outputsAuto: el<HTMLInputElement>("outputs-auto"),
+  outputsTrim: el<HTMLButtonElement>("outputs-trim"),
+  outputsNote: el("outputs-note"),
 };
 
 function esc(value: unknown): string {
@@ -167,6 +207,27 @@ function formatDuration(ms: number): string {
 
 function formatTime(ms: number): string {
   return new Date(ms).toLocaleTimeString(locale());
+}
+
+/** Whole percent, clamped — a step past the max would otherwise overflow the bar. */
+function progressPercent(progress: { value: number; max: number }): number {
+  return Math.min(100, Math.max(0, Math.round((progress.value / progress.max) * 100)));
+}
+
+/** Bytes as gigabytes with one decimal, the unit VRAM is talked about in. */
+function gb(bytes: number): string {
+  return (bytes / 1024 ** 3).toFixed(1);
+}
+
+/** "3.2 GB" or "410 MB", for sizes whose scale is not known in advance. */
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 ** 3) return `${gb(bytes)} GB`;
+  return `${Math.round(bytes / 1024 ** 2)} MB`;
+}
+
+/** Whole minutes still to go. Never zero: seconds left is still time left. */
+function minutesLeft(until: number): number {
+  return Math.max(1, Math.ceil((until - Date.now()) / 60_000));
 }
 
 /**
@@ -211,7 +272,10 @@ function outputUrl(output: RunOutput): string {
   return `/api/output?${query}`;
 }
 
-async function post(path: string, body?: unknown): Promise<{ ok: boolean; error?: string }> {
+async function post<T = unknown>(
+  path: string,
+  body?: unknown,
+): Promise<{ ok: boolean; error?: string; data?: T }> {
   try {
     const res = await fetch(path, {
       method: "POST",
@@ -221,8 +285,10 @@ async function post(path: string, body?: unknown): Promise<{ ok: boolean; error?
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
-    const parsed = (await res.json().catch(() => ({}))) as { error?: string };
-    return res.ok ? { ok: true } : { ok: false, error: parsed.error ?? `HTTP ${res.status}` };
+    const parsed = (await res.json().catch(() => ({}))) as { error?: string } & T;
+    return res.ok
+      ? { ok: true, data: parsed }
+      : { ok: false, error: parsed.error ?? `HTTP ${res.status}` };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
@@ -249,10 +315,13 @@ function setNote(target: HTMLElement, text: string, isError = false): void {
 // Pages
 // ---------------------------------------------------------------------------
 
-/** Settings is the landing page; running a workflow by hand is the sideline. */
+/**
+ * Workflows is the landing tab; running a workflow by hand is the sideline.
+ * Any hash naming no tab lands there too — the old `#/settings` included.
+ */
 function currentPage(): Page {
   const hash = location.hash.replace(/^#\/?/, "");
-  return (PAGES as readonly string[]).includes(hash) ? (hash as Page) : "settings";
+  return (PAGES as readonly string[]).includes(hash) ? (hash as Page) : "workflows";
 }
 
 function showPage(): void {
@@ -291,15 +360,45 @@ function renderVitals(state: State): void {
   const healthy = agent.upstreams.filter((server) => server.heartbeat?.ok).length;
   const agentTone = healthy === total ? "ok" : healthy > 0 ? "warn" : "bad";
 
+  // What is holding jobs back beats the mode here: "accepting" with a pause
+  // running is not what anyone glancing at the bar wants to be told.
+  const gate = state.accepting;
+  const work =
+    gate.blockedBy === "paused" && gate.pausedUntil !== null
+      ? { label: t("accept.paused", { minutes: minutesLeft(gate.pausedUntil) }), tone: "idle" }
+      : gate.blockedBy === "schedule"
+        ? { label: t("accept.outside"), tone: "idle" }
+        : { label: modeLabel(state.mode), tone: MODE_TONE[state.mode] };
+
   const chips = [
     chip(t("vitals.comfy"), esc(comfyStatusLabel(comfy.comfyStatus)), tone),
     chip(t("vitals.running"), pad(comfy.queueRunning)),
     chip(t("vitals.pending"), pad(comfy.queuePending)),
+  ];
+
+  // The GPU is what this machine lends out, so its headroom belongs up here.
+  // The dot only appears when the free VRAM is running out.
+  if (comfy.gpu) {
+    const low = comfy.gpu.vramFree / comfy.gpu.vramTotal < 0.1;
+    chips.push(
+      chip(
+        t("vitals.vram"),
+        `${gb(comfy.gpu.vramTotal - comfy.gpu.vramFree)}/${gb(comfy.gpu.vramTotal)} GB`,
+        low ? "warn" : undefined,
+      ),
+    );
+  }
+
+  chips.push(
     total === 0
       ? chip(t("vitals.agent"), t("vitals.standalone"))
       : chip(t("vitals.agent"), `${pad(healthy)}/${pad(total)}`, agentTone),
-    chip(t("vitals.work"), modeLabel(state.mode), MODE_TONE[state.mode]),
-  ];
+    chip(t("vitals.work"), work.label, work.tone),
+  );
+
+  if (state.progress && state.progress.max > 0) {
+    chips.push(chip(t("vitals.progress"), `${progressPercent(state.progress)}%`, "run"));
+  }
 
   if (comfyProcess.managed) {
     chips.push(chip(t("vitals.process"), `pid ${comfyProcess.pid ?? "?"}`, "run"));
@@ -373,6 +472,36 @@ function slotTags(summary: WorkflowSummary): string {
   return `<div class="slots">${tags.join("")}</div>`;
 }
 
+/**
+ * The last check of each workflow against the running ComfyUI, held here the
+ * way server test results are held on their rows. Nothing until one is run.
+ */
+type WorkflowCheck = { checking?: boolean; ok?: boolean; problems?: string[]; error?: string };
+const workflowChecks = new Map<string, WorkflowCheck>();
+
+function checkResultFor(name: string): string {
+  const check = workflowChecks.get(name);
+  if (!check) return "";
+  if (check.checking) return `<p class="meta">${t("workflows.checking")}</p>`;
+  if (check.error) return `<p class="error">${esc(check.error)}</p>`;
+  if (check.ok) return `<p class="meta">${t("workflows.checkOk")}</p>`;
+  return (check.problems ?? []).map((problem) => `<p class="error">${esc(problem)}</p>`).join("");
+}
+
+async function runWorkflowCheck(name: string): Promise<void> {
+  workflowChecks.set(name, { checking: true });
+  if (latestState) renderWorkflows(latestState);
+
+  const result = await post<{ ok: boolean; problems: string[] }>("/api/workflows/check", { name });
+  workflowChecks.set(
+    name,
+    result.ok
+      ? { ok: result.data?.ok ?? false, problems: result.data?.problems ?? [] }
+      : { error: result.error ?? t("workflows.checkFailed") },
+  );
+  if (latestState) renderWorkflows(latestState);
+}
+
 function renderWorkflows(state: State): void {
   nodes.workflowDir.textContent = t("workflows.dir", { dir: state.workflowDir });
 
@@ -390,6 +519,11 @@ function renderWorkflows(state: State): void {
           ${active ? `<span class="state"><span class="dot run"></span>${t("workflows.active")}</span>` : ""}
           <span class="spacer"></span>
           ${
+            summary.valid
+              ? `<button type="button" class="ghost" data-check-workflow="${esc(summary.name)}">${t("workflows.check")}</button>`
+              : ""
+          }
+          ${
             active || !summary.valid
               ? ""
               : `<button type="button" class="ghost" data-activate="${esc(summary.name)}">${t("workflows.makeActive")}</button>`
@@ -405,6 +539,7 @@ function renderWorkflows(state: State): void {
         ${head}
         <p class="meta">${t("workflows.nodes", { count: summary.nodeCount ?? 0 })}</p>
         ${slotTags(summary)}
+        ${checkResultFor(summary.name)}
       </div>`;
     })
     .join("");
@@ -416,7 +551,14 @@ function renderWorkflows(state: State): void {
 // Upstream servers — an editor, so polling must not overwrite what is typed
 // ---------------------------------------------------------------------------
 
-type ServerRow = UpstreamView & { secret: string };
+type UpstreamTest = { ok: boolean; ms: number; pendingJobs?: number; error?: string };
+
+/**
+ * A row as it stands on screen: the stored server, the secret box (blank means
+ * "keep the stored one"), and the last test of it. `testing` is held on the row
+ * rather than globally so testing one server leaves the others alone.
+ */
+type ServerRow = UpstreamView & { secret: string; testing?: boolean; test?: UpstreamTest };
 
 let serverRows: ServerRow[] | null = null;
 let serversDirty = false;
@@ -431,6 +573,23 @@ function heartbeatFor(state: State, row: ServerRow): string {
   return `<span class="state"><span class="dot ${beat.ok ? "ok" : "bad"}"></span>${
     beat.ok ? t("servers.up") : t("servers.down")
   }${waiting}</span>`;
+}
+
+/** The last test of this row, in its own words. Nothing until one is run. */
+function testResultFor(row: ServerRow): string {
+  if (row.testing) return `<p class="meta">${t("servers.testing")}</p>`;
+  if (!row.test) return "";
+
+  if (!row.test.ok) {
+    return `<p class="error">${t("servers.testFailed", {
+      error: esc(row.test.error ?? ""),
+    })}</p>`;
+  }
+  const queued =
+    row.test.pendingJobs === undefined
+      ? ""
+      : ` · ${t("servers.queued", { count: row.test.pendingJobs })}`;
+  return `<p class="meta">${t("servers.testOk", { ms: row.test.ms })}${queued}</p>`;
 }
 
 function renderServers(state: State): void {
@@ -449,6 +608,9 @@ function renderServers(state: State): void {
           <span class="mono muted">${pad(index + 1)}</span>
           ${heartbeatFor(state, row)}
           <span class="spacer"></span>
+          <button type="button" class="ghost" data-test-server="${index}">${t(
+            "servers.test",
+          )}</button>
           <button type="button" class="ghost" data-move="${index}" data-dir="-1" ${
             index === 0 ? "disabled" : ""
           } title="${t("servers.higher")}">↑</button>
@@ -487,9 +649,39 @@ function renderServers(state: State): void {
           <input type="checkbox" data-field="enabled" ${row.enabled ? "checked" : ""} />
           <span>${t("servers.enabled")}</span>
         </label>
+        ${testResultFor(row)}
       </div>`,
     )
     .join("")}</div>`;
+}
+
+/**
+ * Ask one server for a heartbeat now and keep the answer on its row. What is on
+ * screen is sent, so a secret typed a moment ago is what gets tried.
+ */
+async function testServer(index: number): Promise<void> {
+  const row = serverRows?.[index];
+  if (!row || !latestState) return;
+
+  row.testing = true;
+  row.test = undefined;
+  renderServers(latestState);
+
+  const result = await post<UpstreamTest>("/api/upstreams/test", {
+    id: row.id || undefined,
+    url: row.url,
+    hostId: row.hostId,
+    // Blank means the stored one, exactly as saving reads it.
+    secret: row.secret,
+  });
+
+  row.testing = false;
+  // A request the server refused outright — a row with no URL yet — is the same
+  // kind of answer as one it sent: it belongs on the row, not in the console.
+  row.test = result.ok
+    ? (result.data ?? { ok: true, ms: 0 })
+    : { ok: false, ms: 0, error: result.error ?? "" };
+  if (latestState) renderServers(latestState);
 }
 
 /** Copy what is on screen back into the model before any structural change. */
@@ -553,7 +745,25 @@ function jobError(job: JobRecord): string {
   return job.error ? `<p class="error">${esc(job.error)}</p>` : "";
 }
 
-function jobEntry(job: JobRecord, withDelete: boolean): string {
+/**
+ * The bar under a running row, and nothing at all otherwise. Matched by prompt
+ * id: ComfyUI reports on the prompt it is executing, which is only this job when
+ * the two ids agree — anything else on that queue is not ours to draw.
+ */
+function progressBar(job: JobRecord, progress: State["progress"]): string {
+  if (job.state !== "running" || !progress || progress.max <= 0) return "";
+  if (!progress.promptId || progress.promptId !== job.promptId) return "";
+
+  const percent = progressPercent(progress);
+  return `<div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}">
+      <span style="width: ${percent}%"></span>
+    </div>
+    <p class="meta">${t("jobs.progress", { percent, value: progress.value, max: progress.max })}${
+      progress.node ? ` · ${t("jobs.node", { node: esc(progress.node) })}` : ""
+    }</p>`;
+}
+
+function jobEntry(job: JobRecord, withDelete: boolean, progress: State["progress"]): string {
   const tone = job.state === "running" ? "run" : job.state === "succeeded" ? "ok" : "bad";
   const origin =
     job.source === "upstream"
@@ -577,18 +787,71 @@ function jobEntry(job: JobRecord, withDelete: boolean): string {
     </div>
     <p class="meta">${formatTime(job.startedAt)} · ${timing}${origin}${
       job.promptId ? ` · ${t("jobs.prompt", { id: esc(job.promptId.slice(0, 8)) })}` : ""
+    }${
+      job.attempts && job.attempts > 1 ? ` · ${t("jobs.attempt", { count: job.attempts })}` : ""
     }</p>
+    ${progressBar(job, progress)}
     ${jobError(job)}
     ${job.outputs?.length ? renderOutputs(job.outputs) : ""}
   </div>`;
 }
 
+// Page-local: the history itself is what it is, only its reading is chosen.
+type JobStateFilter = "all" | JobRecord["state"];
+type JobSourceFilter = "all" | JobRecord["source"];
+type JobsView = "list" | "gallery";
+
+let jobStateFilter: JobStateFilter = "all";
+let jobSourceFilter: JobSourceFilter = "all";
+let jobsView: JobsView = "list";
+
+/**
+ * Every image and video the filtered runs produced, newest first, each cell
+ * opening (or playing) the file itself. Failures and files that are neither
+ * are the list view's business.
+ */
+function galleryHtml(jobs: JobRecord[]): string {
+  const cells: string[] = [];
+  for (const job of jobs) {
+    for (const output of job.outputs ?? []) {
+      const url = outputUrl(output);
+      const name = esc(output.filename);
+      const caption = `${esc(job.workflow)} · ${formatTime(job.startedAt)}`;
+      if (output.kind === "image") {
+        cells.push(
+          `<a class="cell" href="${url}" target="_blank" rel="noreferrer" title="${caption}">` +
+            `<img src="${url}" alt="${name}" loading="lazy" /></a>`,
+        );
+      } else if (output.kind === "video") {
+        cells.push(
+          `<div class="cell" title="${caption}">` +
+            `<video src="${url}" controls preload="metadata" title="${name}"></video></div>`,
+        );
+      }
+    }
+  }
+  if (cells.length === 0) return `<p class="empty">${t("jobs.noMedia")}</p>`;
+  return `<div class="gallery">${cells.join("")}</div>`;
+}
+
 function renderJobs(state: State): void {
-  if (state.jobs.length === 0) {
-    renderIfChanged(nodes.jobs, "jobs", `<p class="empty">${t("jobs.empty")}</p>`);
+  const jobs = state.jobs.filter(
+    (job) =>
+      (jobStateFilter === "all" || job.state === jobStateFilter) &&
+      (jobSourceFilter === "all" || job.source === jobSourceFilter),
+  );
+
+  if (jobsView === "gallery") {
+    renderIfChanged(nodes.jobs, "jobs", galleryHtml(jobs));
     return;
   }
-  const html = state.jobs.map((job) => jobEntry(job, true)).join("");
+  if (jobs.length === 0) {
+    // An empty history and a filter that matched nothing read differently.
+    const text = state.jobs.length === 0 ? t("jobs.empty") : t("jobs.noMatch");
+    renderIfChanged(nodes.jobs, "jobs", `<p class="empty">${text}</p>`);
+    return;
+  }
+  const html = jobs.map((job) => jobEntry(job, true, state.progress)).join("");
   renderIfChanged(nodes.jobs, "jobs", `<div class="ledger">${html}</div>`);
 }
 
@@ -602,6 +865,59 @@ function syncSettings(state: State): void {
   if (settingsDirty) return;
   nodes.comfyDir.value = state.settings.comfyDir;
   nodes.comfyCommand.value = state.settings.comfyCommand;
+}
+
+// ---------------------------------------------------------------------------
+// Outputs — ComfyUI's output folder
+// ---------------------------------------------------------------------------
+
+function syncOutputs(state: State): void {
+  if (!state.outputs) {
+    nodes.outputsDir.textContent = "";
+    nodes.outputsInfo.textContent = t("outputs.none");
+    nodes.outputsTrim.disabled = true;
+  } else {
+    nodes.outputsDir.textContent = state.outputs.dir;
+    nodes.outputsInfo.textContent = t("outputs.count", {
+      files: state.outputs.files,
+      size: formatBytes(state.outputs.bytes),
+    });
+    nodes.outputsTrim.disabled = false;
+  }
+
+  // Like the schedule times: only the field being typed into is left alone.
+  if (document.activeElement !== nodes.outputsAuto) {
+    nodes.outputsAuto.value = String(state.settings.outputCleanupDays);
+  }
+}
+
+async function trimOutputsNow(): Promise<void> {
+  const days = Number(nodes.outputsDays.value);
+  if (!Number.isFinite(days) || days < 1) {
+    setNote(nodes.outputsNote, t("outputs.needDays"), true);
+    return;
+  }
+  if (!confirm(t("outputs.confirm", { days }))) return;
+
+  nodes.outputsTrim.disabled = true;
+  setNote(nodes.outputsNote, t("outputs.trimming"));
+  const result = await post<{ removedFiles: number; removedBytes: number }>("/api/outputs/trim", {
+    days,
+  });
+  nodes.outputsTrim.disabled = false;
+
+  if (!result.ok) {
+    setNote(nodes.outputsNote, result.error ?? t("outputs.trimFailed"), true);
+    return;
+  }
+  setNote(
+    nodes.outputsNote,
+    t("outputs.trimmed", {
+      files: result.data?.removedFiles ?? 0,
+      size: formatBytes(result.data?.removedBytes ?? 0),
+    }),
+  );
+  void poll();
 }
 
 // ---------------------------------------------------------------------------
@@ -621,7 +937,10 @@ function openPopover(target: Popover | null): void {
     popover.panel.hidden = !open;
     popover.button.setAttribute("aria-expanded", String(open));
   }
-  if (target !== DESKTOP_POPOVER) setNote(nodes.desktopNote, "");
+  if (target !== DESKTOP_POPOVER) {
+    setNote(nodes.desktopNote, "");
+    setNote(nodes.notifyNote, "");
+  }
   if (target !== MODE_POPOVER) setNote(nodes.modeNote, "");
 }
 
@@ -658,6 +977,59 @@ function syncMode(state: State): void {
   for (const option of document.querySelectorAll<HTMLElement>("[data-mode]")) {
     option.setAttribute("aria-pressed", String(option.dataset["mode"] === state.mode));
   }
+
+  const gate = state.accepting;
+  nodes.modeGate.textContent =
+    gate.blockedBy === "paused" && gate.pausedUntil !== null
+      ? t("accept.gatePaused", { minutes: minutesLeft(gate.pausedUntil) })
+      : gate.blockedBy === "schedule"
+        ? t("accept.gateSchedule", { from: gate.schedule.from, to: gate.schedule.to })
+        : "";
+}
+
+// ---------------------------------------------------------------------------
+// Accepting — when the mode is allowed to claim
+// ---------------------------------------------------------------------------
+
+/** Held while a control is in flight, so a poll cannot flip it back. */
+let acceptBusy = false;
+
+function syncAccepting(state: State): void {
+  const { pausedUntil, schedule } = state.accepting;
+
+  nodes.acceptPauseState.textContent =
+    pausedUntil === null
+      ? t("accept.notPaused")
+      : t("accept.pausedUntil", {
+          time: formatTime(pausedUntil),
+          minutes: minutesLeft(pausedUntil),
+        });
+
+  // Nothing to resume from when nothing is on hold.
+  for (const button of nodes.acceptPause.querySelectorAll<HTMLButtonElement>('[data-pause="0"]')) {
+    button.disabled = pausedUntil === null;
+  }
+
+  if (acceptBusy) return;
+  nodes.acceptEnabled.checked = schedule.enabled;
+  // A time is saved as soon as it changes, so the only field worth leaving
+  // alone is the one being typed into.
+  if (document.activeElement !== nodes.acceptFrom) nodes.acceptFrom.value = schedule.from;
+  if (document.activeElement !== nodes.acceptTo) nodes.acceptTo.value = schedule.to;
+}
+
+/** Send one change, then let the next poll confirm it. */
+async function saveAccepting(path: string, body: unknown): Promise<void> {
+  acceptBusy = true;
+  const result = await post(path, body);
+  acceptBusy = false;
+
+  setNote(
+    nodes.acceptNote,
+    result.ok ? t("accept.saved") : (result.error ?? t("accept.saveFailed")),
+    !result.ok,
+  );
+  void poll();
 }
 
 // ---------------------------------------------------------------------------
@@ -690,6 +1062,111 @@ async function saveDesktop(path: string, body: unknown): Promise<void> {
     !result.ok,
   );
   void poll();
+}
+
+// ---------------------------------------------------------------------------
+// Notifications — server-side events turned into OS notifications
+// ---------------------------------------------------------------------------
+
+const NOTIFY_KEY = "notify";
+const NOTIFY_SEEN_KEY = "notify-seen";
+
+function notifyOn(): boolean {
+  try {
+    return localStorage.getItem(NOTIFY_KEY) === "on";
+  } catch {
+    return false;
+  }
+}
+
+function storeNotify(on: boolean): void {
+  try {
+    localStorage.setItem(NOTIFY_KEY, on ? "on" : "off");
+  } catch {
+    // Private mode — the choice lasts for this tab only.
+  }
+}
+
+let notifySeen = (() => {
+  try {
+    return Number(localStorage.getItem(NOTIFY_SEEN_KEY) ?? "0") || 0;
+  } catch {
+    return 0;
+  }
+})();
+
+/** False until the first poll: its backlog predates this page, so it is noise. */
+let notifyPrimed = false;
+
+function rememberSeen(id: number): void {
+  notifySeen = id;
+  try {
+    localStorage.setItem(NOTIFY_SEEN_KEY, String(id));
+  } catch {
+    // Private mode — an old event may notify again after a reload.
+  }
+}
+
+function notifyGranted(): boolean {
+  return "Notification" in window && Notification.permission === "granted";
+}
+
+function syncNotify(state: State): void {
+  const newest = state.events.at(-1)?.id ?? 0;
+
+  if (!notifyPrimed) {
+    notifyPrimed = true;
+    if (newest > notifySeen) rememberSeen(newest);
+    return;
+  }
+  if (newest <= notifySeen) return;
+
+  const fresh = state.events.filter((event) => event.id > notifySeen);
+  // Advanced even while notifications are off, so turning them on later does
+  // not replay history.
+  rememberSeen(newest);
+  if (!notifyOn() || !notifyGranted()) return;
+
+  for (const event of fresh) {
+    const key = `notify.${event.kind}`;
+    // A kind this page has no words for is skipped rather than crashed on —
+    // the server can be newer than a cached page.
+    if (!isKey(key)) continue;
+    try {
+      new Notification(t(key, event.params), {
+        body: event.params["error"] ?? "",
+        tag: `dcs-${event.id}`,
+      });
+    } catch {
+      // The permission can be revoked between polls; nothing to be done.
+    }
+  }
+}
+
+/**
+ * Turning it on asks the browser there and then, so the permission prompt is
+ * the answer to a click rather than appearing out of nowhere.
+ */
+async function setNotify(on: boolean): Promise<void> {
+  if (!on) {
+    storeNotify(false);
+    setNote(nodes.notifyNote, "");
+    return;
+  }
+  if (!("Notification" in window)) {
+    nodes.notifyEnabled.checked = false;
+    setNote(nodes.notifyNote, t("notify.unsupported"), true);
+    return;
+  }
+  const permission =
+    Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
+  if (permission !== "granted") {
+    nodes.notifyEnabled.checked = false;
+    setNote(nodes.notifyNote, t("notify.blocked"), true);
+    return;
+  }
+  storeNotify(true);
+  setNote(nodes.notifyNote, "");
 }
 
 // ---------------------------------------------------------------------------
@@ -759,8 +1236,11 @@ function render(state: State): void {
   syncServers(state);
   renderJobs(state);
   syncSettings(state);
+  syncOutputs(state);
   syncMode(state);
+  syncAccepting(state);
   syncDesktop(state);
+  syncNotify(state);
   syncForm(state);
 }
 
@@ -858,7 +1338,13 @@ onLangChange(() => {
 
   // Notes report something that has already happened, so they are cleared
   // rather than translated after the fact.
-  for (const note of [nodes.note, nodes.uploadNote, nodes.settingsNote, nodes.serversNote]) {
+  for (const note of [
+    nodes.note,
+    nodes.uploadNote,
+    nodes.settingsNote,
+    nodes.serversNote,
+    nodes.acceptNote,
+  ]) {
     setNote(note, "");
   }
 
@@ -954,6 +1440,12 @@ nodes.uploadForm.addEventListener("submit", async (event) => {
 nodes.workflows.addEventListener("click", async (event) => {
   const target = event.target as HTMLElement;
 
+  const check = target.closest<HTMLElement>("[data-check-workflow]")?.dataset["checkWorkflow"];
+  if (check) {
+    void runWorkflowCheck(check);
+    return;
+  }
+
   const activate = target.closest<HTMLElement>("[data-activate]")?.dataset["activate"];
   if (activate) {
     await post("/api/workflows/active", { name: activate });
@@ -981,6 +1473,33 @@ el("server-add").addEventListener("click", () => {
   if (latestState) renderServers(latestState);
 });
 
+/**
+ * The row is written on the server side, so what comes back is the truth and
+ * the editor is resynced onto it — including anything typed but not saved.
+ */
+el("server-link").addEventListener("click", async () => {
+  const url = nodes.linkUrl.value.trim();
+  const code = nodes.linkCode.value.trim();
+  if (!url || !code) {
+    setNote(nodes.linkNote, t("servers.linkNeeds"), true);
+    return;
+  }
+
+  setNote(nodes.linkNote, t("servers.linking"));
+  const result = await post<{ hostName: string | null }>("/api/link", { url, code });
+  if (!result.ok) {
+    setNote(nodes.linkNote, result.error ?? t("servers.linkFailed"), true);
+    return;
+  }
+
+  // Spent on use, so leaving it in the box would only invite a second try.
+  nodes.linkCode.value = "";
+  serversDirty = false;
+  const name = result.data?.hostName;
+  setNote(nodes.linkNote, name ? t("servers.linkedAs", { name }) : t("servers.linked"));
+  void poll();
+});
+
 nodes.servers.addEventListener("input", () => {
   serversDirty = true;
 });
@@ -999,6 +1518,13 @@ nodes.servers.addEventListener("click", (event) => {
       serversDirty = true;
       if (latestState) renderServers(latestState);
     }
+    return;
+  }
+
+  const test = target.closest<HTMLElement>("[data-test-server]");
+  if (test && serverRows) {
+    readServerInputs();
+    void testServer(Number(test.dataset["testServer"]));
     return;
   }
 
@@ -1059,6 +1585,44 @@ nodes.jobs.addEventListener("click", async (event) => {
   void poll();
 });
 
+function syncJobFilterButtons(): void {
+  const groups: [attribute: string, current: string][] = [
+    ["data-job-state", jobStateFilter],
+    ["data-job-source", jobSourceFilter],
+    ["data-job-view", jobsView],
+  ];
+  for (const [attribute, current] of groups) {
+    for (const button of document.querySelectorAll<HTMLElement>(`[${attribute}]`)) {
+      button.setAttribute("aria-pressed", String(button.getAttribute(attribute) === current));
+    }
+  }
+}
+
+/** The three groups differ only in which variable a click sets. */
+function wireJobFilter(id: string, attribute: string, apply: (value: string) => void): void {
+  el(id).addEventListener("click", (event) => {
+    const value = (event.target as HTMLElement)
+      .closest<HTMLElement>(`[${attribute}]`)
+      ?.getAttribute(attribute);
+    if (!value) return;
+    apply(value);
+    syncJobFilterButtons();
+    if (latestState) renderJobs(latestState);
+  });
+}
+
+wireJobFilter("jobs-state", "data-job-state", (value) => {
+  jobStateFilter = value as JobStateFilter;
+});
+wireJobFilter("jobs-source", "data-job-source", (value) => {
+  jobSourceFilter = value as JobSourceFilter;
+});
+wireJobFilter("jobs-view", "data-job-view", (value) => {
+  jobsView = value as JobsView;
+});
+
+syncJobFilterButtons();
+
 nodes.settingsForm.addEventListener("input", () => {
   settingsDirty = true;
 });
@@ -1093,6 +1657,22 @@ async function toggleComfy(): Promise<void> {
 
 nodes.comfyPower.addEventListener("click", () => void toggleComfy());
 nodes.comfyPower2.addEventListener("click", () => void toggleComfy());
+
+nodes.outputsTrim.addEventListener("click", () => void trimOutputsNow());
+
+// Saved on change like the schedule: one number is not worth a Save button.
+nodes.outputsAuto.addEventListener("change", async () => {
+  const days = Number(nodes.outputsAuto.value);
+  const result = await post("/api/settings", {
+    outputCleanupDays: Number.isFinite(days) ? days : 0,
+  });
+  setNote(
+    nodes.outputsNote,
+    result.ok ? t("outputs.saved") : (result.error ?? t("comfy.saveFailed")),
+    !result.ok,
+  );
+  void poll();
+});
 
 nodes.desktopOpen.addEventListener("click", () => toggle(DESKTOP_POPOVER));
 nodes.modeOpen.addEventListener("click", () => toggle(MODE_POPOVER));
@@ -1136,12 +1716,37 @@ nodes.desktopAutostart.addEventListener("change", () => {
   void saveDesktop("/api/desktop", { autostart: nodes.desktopAutostart.checked });
 });
 
+nodes.notifyEnabled.addEventListener("change", () => void setNotify(nodes.notifyEnabled.checked));
+
 nodes.desktopPanel.addEventListener("click", (event) => {
   const choice = (event.target as HTMLElement).closest<HTMLElement>("[data-close-action]")?.dataset[
     "closeAction"
   ];
   if (choice) void saveDesktop("/api/desktop", { closeAction: choice });
 });
+
+nodes.acceptPause.addEventListener("click", (event) => {
+  const minutes = (event.target as HTMLElement).closest<HTMLElement>("[data-pause]")?.dataset[
+    "pause"
+  ];
+  if (minutes === undefined) return;
+  void saveAccepting("/api/accept/pause", { minutes: Number(minutes) });
+});
+
+nodes.acceptEnabled.addEventListener("change", () => {
+  void saveAccepting("/api/accept/schedule", { enabled: nodes.acceptEnabled.checked });
+});
+
+// Both go together: a window is the pair, and sending one of them alone would
+// save a half-edited window on the way to the other field.
+for (const input of [nodes.acceptFrom, nodes.acceptTo]) {
+  input.addEventListener("change", () => {
+    void saveAccepting("/api/accept/schedule", {
+      from: nodes.acceptFrom.value,
+      to: nodes.acceptTo.value,
+    });
+  });
+}
 
 // Ticking elapsed time for running jobs, kept out of the render pass so it
 // never rewrites the job list.
@@ -1151,6 +1756,9 @@ setInterval(() => {
     if (Number.isFinite(started)) span.textContent = formatDuration(Date.now() - started);
   }
 }, 1000);
+
+// A permission revoked since last time reads as "off", matching what happens.
+nodes.notifyEnabled.checked = notifyOn() && notifyGranted();
 
 applyTheme(currentTheme());
 setLang(lang());

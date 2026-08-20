@@ -18,6 +18,9 @@ logs
 .env
 .env.*.local
 
+# Updater signing keys — the private key must never be committed.
+.secrets
+
 # runtime state (active workflow selection, etc.)
 .state.json
 .jobs.json

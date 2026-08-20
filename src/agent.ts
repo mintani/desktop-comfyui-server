@@ -1,13 +1,17 @@
 import { Buffer } from "node:buffer";
+import { acceptState } from "./accepting";
 import { uploadImage } from "./comfy";
 import {
   AUTO_UPDATE,
   COMFY_URL,
   HEARTBEAT_INTERVAL_MS,
+  JOB_RETRIES,
   POLL_INTERVAL_MS,
+  RETRY_DELAY_MS,
   UPDATE_CHECK_INTERVAL_MS,
 } from "./config";
-import { completeJob, failJob, markQueued, startJob } from "./jobs";
+import { pushEvent } from "./events";
+import { completeJob, failJob, markQueued, noteAttempt, startJob } from "./jobs";
 import { latestStatus, refreshStatus } from "./status";
 import { RESTART_EXIT_CODE, remoteHasUpdate } from "./updater";
 import { loadSettings } from "./settings";
@@ -59,12 +63,17 @@ async function sendHeartbeats() {
 
   await Promise.all(
     upstreams.map(async (server) => {
+      // What the last beat said, so only a change of state is announced.
+      const was = heartbeats.get(server.name)?.ok;
+
       const ack = await sendHeartbeat(server, status);
       if (!ack) {
         heartbeats.set(server.name, { ok: false, at: Date.now() });
+        if (was !== false) pushEvent("upstream-down", { server: server.name });
         return;
       }
       heartbeats.set(server.name, { ok: true, at: Date.now(), pendingJobs: ack.pendingJobs });
+      if (was === false) pushEvent("upstream-up", { server: server.name });
       const backlog =
         ack.pendingJobs === undefined ? "" : ` | upstream queue: ${ack.pendingJobs} waiting`;
       console.log(
@@ -106,39 +115,64 @@ async function processJob(server: UpstreamServer, claimed: ClaimedJob) {
     workflow: workflowName,
   });
 
-  try {
-    let imageFilename: string | undefined;
-    if (claimed.sourceImageBase64) {
-      const contentType = claimed.sourceImageContentType || "image/png";
-      const ext = contentType.split("/")[1] ?? "png";
-      imageFilename = await uploadImage(
-        COMFY_URL,
-        `input_${claimed.jobId}.${ext}`,
-        contentType,
-        Buffer.from(claimed.sourceImageBase64, "base64"),
+  // A transient failure — a network blip, ComfyUI mid-restart — gets retried
+  // on this machine before the job server hears anything: the job is claimed
+  // and would not be handed out again anyway. Only claimed jobs retry; a run
+  // from the UI has someone watching it, who would not expect a quiet rerun.
+  const tries = 1 + JOB_RETRIES;
+
+  for (let attempt = 1; ; attempt++) {
+    if (attempt > 1) noteAttempt(job, attempt);
+
+    try {
+      let imageFilename: string | undefined;
+      if (claimed.sourceImageBase64) {
+        const contentType = claimed.sourceImageContentType || "image/png";
+        const ext = contentType.split("/")[1] ?? "png";
+        // The name repeats across attempts and the upload overwrites, so a
+        // retry cannot litter ComfyUI's input folder.
+        imageFilename = await uploadImage(
+          COMFY_URL,
+          `input_${claimed.jobId}.${ext}`,
+          contentType,
+          Buffer.from(claimed.sourceImageBase64, "base64"),
+        );
+        console.log(`[worker] uploaded input image → ${imageFilename}`);
+      }
+
+      const outputs = await runWorkflow(
+        workflowName,
+        { ...claimed.params, imageFilename },
+        (promptId) => markQueued(job, promptId),
       );
-      console.log(`[worker] uploaded input image → ${imageFilename}`);
+
+      // Upstreams expect a single artefact. Video workflows also emit preview
+      // images, so prefer a playable file over whatever happens to come first.
+      const primary = outputs.find((output) => output.kind === "video") ?? outputs[0]!;
+      await uploadResult(server, claimed.jobId, primary.url);
+      await reportComplete(server, claimed.jobId);
+
+      completeJob(job, outputs);
+      console.log(`[worker] job ${claimed.jobId} completed`);
+      return;
+    } catch (err) {
+      const reason = message(err);
+
+      if (attempt < tries && running) {
+        console.error(
+          `[worker] job ${claimed.jobId} attempt ${attempt}/${tries} failed: ${reason}` +
+            ` — retrying in ${Math.round(RETRY_DELAY_MS / 1000)} s`,
+        );
+        await idle(RETRY_DELAY_MS);
+        // The agent was stopped mid-wait; report rather than run on regardless.
+        if (running) continue;
+      }
+
+      console.error(`[worker] job ${claimed.jobId} failed: ${reason}`);
+      failJob(job, reason);
+      await reportFailure(server, claimed.jobId, reason);
+      return;
     }
-
-    const outputs = await runWorkflow(
-      workflowName,
-      { ...claimed.params, imageFilename },
-      (promptId) => markQueued(job, promptId),
-    );
-
-    // Upstreams expect a single artefact. Video workflows also emit preview
-    // images, so prefer a playable file over whatever happens to come first.
-    const primary = outputs.find((output) => output.kind === "video") ?? outputs[0]!;
-    await uploadResult(server, claimed.jobId, primary.url);
-    await reportComplete(server, claimed.jobId);
-
-    completeJob(job, outputs);
-    console.log(`[worker] job ${claimed.jobId} completed`);
-  } catch (err) {
-    const reason = message(err);
-    console.error(`[worker] job ${claimed.jobId} failed: ${reason}`);
-    failJob(job, reason);
-    await reportFailure(server, claimed.jobId, reason);
   }
 }
 
@@ -177,10 +211,10 @@ async function runPoll() {
       }
     }
 
-    // Only the first mode claims. Heartbeats carry on either way, so the
-    // upstream still sees this host as alive — its queue simply is not drained
-    // from here.
-    if ((await loadSettings()).mode !== "accepting") {
+    // Only the first mode claims, and a pause or a daily window can withhold
+    // it further. Heartbeats carry on through all of it, so the upstream still
+    // sees this host as alive — its queue simply is not drained from here.
+    if (!acceptState(await loadSettings()).accepting) {
       await idle(POLL_INTERVAL_MS);
       continue;
     }
@@ -239,7 +273,29 @@ export async function reloadAgent(servers: UpstreamServer[]): Promise<void> {
   startAgent(servers);
 }
 
-/** Called after the Servers page saves, so a change takes effect at once. */
+/**
+ * Called after the Servers page saves, so a change takes effect at once.
+ *
+ * A running loop is handed the new list instead of being restarted. Restarting
+ * means waiting for the loop to leave the job it is in, which is up to
+ * `JOB_TIMEOUT_MS` of a page that looks hung — and nothing needs the wait:
+ * only starting a second loop alongside the first would double-claim, and
+ * swapping a list in place never does that. The job in flight finishes against
+ * the server it was claimed from, which it holds a reference to.
+ */
 export async function applyUpstreamChange(): Promise<void> {
-  await reloadAgent(activeUpstreams(await loadSettings()));
+  const servers = activeUpstreams(await loadSettings());
+
+  // Nothing is running, so there is no loop to hand it to.
+  if (!running) {
+    await reloadAgent(servers);
+    return;
+  }
+
+  upstreams = servers;
+  heartbeats.clear();
+
+  // Nothing left to claim from. Heartbeats stop now; the job in flight still
+  // reports back, because it carries its own server.
+  if (servers.length === 0) stopAgent();
 }

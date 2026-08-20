@@ -103,6 +103,9 @@
                 <span class="muted" data-i18n="mode.pausedNote"></span>
               </span>
             </button>
+            <!-- What is holding jobs back while the mode above says they are
+                 welcome: a pause running out, or the wrong time of day. -->
+            <p class="muted" id="mode-gate"></p>
             <p class="muted" id="mode-note"></p>
           </div>
         </div>
@@ -148,6 +151,13 @@
               </button>
               <button type="button" data-close-action="quit" data-i18n="desktop.quit">Quits</button>
             </div>
+
+            <p class="popover-label" data-i18n="notify.label">Notifications</p>
+            <label class="switch">
+              <input type="checkbox" id="notify-enabled" />
+              <span data-i18n="notify.enable">Notify about failures</span>
+            </label>
+            <p class="muted" id="notify-note"></p>
 
             <p class="muted" data-i18n="desktop.note"></p>
             <p class="muted" id="desktop-note"></p>
@@ -231,10 +241,20 @@
     <div class="statusbar" id="vitals"></div>
 
     <div class="shell">
-      <!-- Navigation only. Actions and settings live on the pages themselves. -->
+      <!-- Navigation only. Actions and settings live on the pages themselves.
+           One tab per subject, so a page fits on screen instead of scrolling. -->
       <nav class="sidebar" data-i18n-label="nav.label">
-        <a class="nav-item" href="#/settings" data-page-link="settings" data-i18n="nav.settings"
-          >Settings</a
+        <a class="nav-item" href="#/workflows" data-page-link="workflows" data-i18n="nav.workflows"
+          >Workflows</a
+        >
+        <a class="nav-item" href="#/comfyui" data-page-link="comfyui" data-i18n="nav.comfyui"
+          >ComfyUI</a
+        >
+        <a class="nav-item" href="#/servers" data-page-link="servers" data-i18n="nav.servers"
+          >Servers</a
+        >
+        <a class="nav-item" href="#/accepting" data-page-link="accepting" data-i18n="nav.accepting"
+          >Accepting</a
         >
         <a class="nav-item" href="#/generate" data-page-link="generate" data-i18n="nav.generate"
           >Generate</a
@@ -319,12 +339,93 @@
                   Clear finished
                 </button>
               </div>
+
+              <!-- Narrowing and reshaping only — the history itself is what it
+                   is. The choices live in the page, not on the server. -->
+              <div class="filters">
+                <div
+                  class="segmented text"
+                  id="jobs-state"
+                  role="group"
+                  data-i18n-label="jobs.filterState"
+                >
+                  <button type="button" data-job-state="all" data-i18n="jobs.all">All</button>
+                  <button type="button" data-job-state="running" data-i18n="jobs.running">
+                    running
+                  </button>
+                  <button type="button" data-job-state="succeeded" data-i18n="jobs.succeeded">
+                    succeeded
+                  </button>
+                  <button type="button" data-job-state="failed" data-i18n="jobs.failed">
+                    failed
+                  </button>
+                </div>
+                <div
+                  class="segmented text"
+                  id="jobs-source"
+                  role="group"
+                  data-i18n-label="jobs.filterSource"
+                >
+                  <button type="button" data-job-source="all" data-i18n="jobs.all">All</button>
+                  <button type="button" data-job-source="ui" data-i18n="jobs.ui">UI</button>
+                  <button type="button" data-job-source="upstream" data-i18n="jobs.upstream">
+                    upstream
+                  </button>
+                </div>
+                <div
+                  class="segmented"
+                  id="jobs-view"
+                  role="group"
+                  data-i18n-label="jobs.filterView"
+                >
+                  <button
+                    type="button"
+                    data-job-view="list"
+                    data-i18n-title="jobs.listView"
+                    aria-pressed="true"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M4 6h16M4 12h16M4 18h16" />
+                    </svg>
+                    <span class="sr-only" data-i18n="jobs.listView">List</span>
+                  </button>
+                  <button
+                    type="button"
+                    data-job-view="gallery"
+                    data-i18n-title="jobs.galleryView"
+                    aria-pressed="false"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      aria-hidden="true"
+                    >
+                      <rect x="4" y="4" width="7" height="7" rx="1" />
+                      <rect x="13" y="4" width="7" height="7" rx="1" />
+                      <rect x="4" y="13" width="7" height="7" rx="1" />
+                      <rect x="13" y="13" width="7" height="7" rx="1" />
+                    </svg>
+                    <span class="sr-only" data-i18n="jobs.galleryView">Gallery</span>
+                  </button>
+                </div>
+              </div>
+
               <div id="jobs"></div>
             </section>
           </div>
         </section>
 
-        <section class="page" data-page="settings">
+        <section class="page" data-page="workflows">
           <section class="panel">
             <div class="panel-head">
               <h2 data-i18n="upload.title">Upload</h2>
@@ -362,7 +463,9 @@
             <div class="panel-head"><h2 data-i18n="workflows.title">Installed</h2></div>
             <div id="workflows"></div>
           </section>
+        </section>
 
+        <section class="page" data-page="comfyui" hidden>
           <section class="panel">
             <div class="panel-head"><h2 data-i18n="comfy.title">ComfyUI</h2></div>
             <form id="settings-form">
@@ -394,6 +497,32 @@
             <div id="comfy-process"></div>
           </section>
 
+          <!-- What ComfyUI's output folder holds. Nothing in ComfyUI ever
+               deletes an output, so the disk fills quietly without this. -->
+          <section class="panel">
+            <div class="panel-head"><h2 data-i18n="outputs.title">Outputs</h2></div>
+            <p class="mono muted" id="outputs-dir"></p>
+            <p class="muted" id="outputs-info"></p>
+            <div class="row">
+              <label class="field">
+                <span data-i18n="outputs.olderThan">Older than (days)</span>
+                <input type="number" id="outputs-days" min="1" value="30" />
+              </label>
+              <label class="field">
+                <span data-i18n="outputs.auto">Auto-delete after (days, 0 = off)</span>
+                <input type="number" id="outputs-auto" min="0" />
+              </label>
+            </div>
+            <div class="actions">
+              <button type="button" class="ghost danger" id="outputs-trim" data-i18n="outputs.trim">
+                Delete old outputs
+              </button>
+              <p class="muted" id="outputs-note"></p>
+            </div>
+          </section>
+        </section>
+
+        <section class="page" data-page="servers" hidden>
           <section class="panel">
             <div class="panel-head">
               <h2 data-i18n="servers.title">Upstream servers</h2>
@@ -402,6 +531,29 @@
               </button>
             </div>
             <p class="muted" data-i18n="servers.help"></p>
+            <div class="link">
+              <p class="muted" data-i18n="servers.linkHelp"></p>
+              <div class="row">
+                <label class="field">
+                  <span data-i18n="servers.linkUrl">Server URL</span>
+                  <input type="text" id="link-url" placeholder="https://queue.example.com" />
+                </label>
+                <label class="field">
+                  <span data-i18n="servers.linkCode">Link code</span>
+                  <input
+                    type="text"
+                    id="link-code"
+                    placeholder="XXXX-XXXX-XXXX"
+                    spellcheck="false"
+                    autocomplete="off"
+                  />
+                </label>
+              </div>
+              <div class="actions">
+                <button type="button" id="server-link" data-i18n="servers.link">Link</button>
+                <p class="muted" id="link-note"></p>
+              </div>
+            </div>
             <div id="servers"></div>
             <div class="actions">
               <button type="button" id="servers-save" data-i18n="servers.save">Save servers</button>
@@ -410,6 +562,52 @@
               </button>
               <p class="muted" id="servers-note"></p>
             </div>
+          </section>
+        </section>
+
+        <!-- The mode in the header says whether this machine takes work at
+             all. This says when, so nobody has to be sitting here to switch
+             it back. Both only ever hold jobs back — a run started here, and
+             ComfyUI itself, are untouched. -->
+        <section class="page" data-page="accepting" hidden>
+          <section class="panel">
+            <div class="panel-head"><h2 data-i18n="accept.title">Accepting jobs</h2></div>
+            <p class="muted" data-i18n="accept.help"></p>
+
+            <p class="popover-label" data-i18n="accept.pauseFor">Hold off for</p>
+            <div class="actions" id="accept-pause">
+              <button type="button" class="ghost" data-pause="15" data-i18n="accept.pause15">
+                15 min
+              </button>
+              <button type="button" class="ghost" data-pause="30" data-i18n="accept.pause30">
+                30 min
+              </button>
+              <button type="button" class="ghost" data-pause="60" data-i18n="accept.pause60">
+                1 hour
+              </button>
+              <button type="button" class="ghost" data-pause="0" data-i18n="accept.resume">
+                Resume now
+              </button>
+            </div>
+            <p class="muted" id="accept-pause-state"></p>
+
+            <p class="popover-label" data-i18n="accept.schedule">Every day</p>
+            <label class="check">
+              <input type="checkbox" id="accept-enabled" />
+              <span data-i18n="accept.scheduleOn">Only accept between these times</span>
+            </label>
+            <div class="row">
+              <label class="field">
+                <span data-i18n="accept.from">From</span>
+                <input type="time" id="accept-from" />
+              </label>
+              <label class="field">
+                <span data-i18n="accept.to">To</span>
+                <input type="time" id="accept-to" />
+              </label>
+            </div>
+            <p class="muted" data-i18n="accept.overnight"></p>
+            <p class="muted" id="accept-note"></p>
           </section>
         </section>
       </main>

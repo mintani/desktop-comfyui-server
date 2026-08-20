@@ -37,9 +37,14 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
+use tauri_plugin_updater::UpdaterExt;
 use uuid::Uuid;
 
 const WINDOW: &str = "main";
+
+/// How often a tray app that runs for weeks looks for a new release, on top
+/// of the check at launch.
+const UPDATE_CHECK_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// The folder this app owns under the platform's data directory. Deliberately
 /// the project name rather than the bundle identifier, which is what
@@ -154,6 +159,82 @@ fn show_window(app: &AppHandle) {
     }
 }
 
+/// Look for a newer release and offer it. `quiet` is the automatic path:
+/// nothing new means nothing said, and a failed check is a log line — the app
+/// must not greet every launch with an error about being offline. The tray
+/// item passes `false` and gets both answered in dialogs.
+fn check_for_update(app: AppHandle, quiet: bool) {
+    tauri::async_runtime::spawn(async move {
+        let updater = match app.updater() {
+            Ok(updater) => updater,
+            Err(err) => {
+                eprintln!("[update] updater unavailable: {err}");
+                return;
+            }
+        };
+
+        match updater.check().await {
+            Ok(Some(update)) => offer_update(&app, update),
+            Ok(None) => {
+                if !quiet {
+                    app.dialog()
+                        .message("You are on the latest version.")
+                        .title("No update available")
+                        .show(|_| {});
+                }
+            }
+            Err(err) => {
+                eprintln!("[update] check failed: {err}");
+                if !quiet {
+                    app.dialog()
+                        .message(format!("Could not check for updates: {err}"))
+                        .title("Update check failed")
+                        .kind(MessageDialogKind::Error)
+                        .show(|_| {});
+                }
+            }
+        }
+    });
+}
+
+/// Ask before touching anything: installing restarts the app, and the person
+/// may be halfway through a run they care about.
+fn offer_update(app: &AppHandle, update: tauri_plugin_updater::Update) {
+    let handle = app.clone();
+    app.dialog()
+        .message(format!(
+            "Version {} is available (you have {}).\n\nInstall it now? The app restarts when it finishes.",
+            update.version, update.current_version,
+        ))
+        .title("Update available")
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Install".to_string(),
+            "Later".to_string(),
+        ))
+        .show(move |confirmed| {
+            if !confirmed {
+                return;
+            }
+            tauri::async_runtime::spawn(async move {
+                // On Windows the installer takes over and this process exits on
+                // its own — the exit handler below kills the sidecar with it.
+                // restart() is for the platforms where it does not.
+                match update.download_and_install(|_, _| {}, || {}).await {
+                    Ok(()) => handle.restart(),
+                    Err(err) => {
+                        eprintln!("[update] install failed: {err}");
+                        handle
+                            .dialog()
+                            .message(format!("Installing the update failed: {err}"))
+                            .title("Update failed")
+                            .kind(MessageDialogKind::Error)
+                            .show(|_| {});
+                    }
+                }
+            });
+        });
+}
+
 /// Take what the server says and make the shell match it. Called on a timer,
 /// so a switch flipped in the page shows up in the tray a moment later.
 fn apply_state(app: &AppHandle, modes: &ModeItems, state: &serde_json::Value) {
@@ -204,6 +285,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             None,
@@ -297,6 +379,8 @@ fn main() {
                 )?,
             };
             let stop_comfy = MenuItem::with_id(app, "stop-comfy", "Stop ComfyUI", true, None::<&str>)?;
+            let check_updates =
+                MenuItem::with_id(app, "check-updates", "Check for updates", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
             let menu = MenuBuilder::new(app)
@@ -306,6 +390,7 @@ fn main() {
                 .separator()
                 .items(&[&stop_comfy])
                 .separator()
+                .items(&[&check_updates])
                 .items(&[&quit])
                 .build()?;
 
@@ -371,6 +456,7 @@ fn main() {
                             api.post("/api/comfy/stop", serde_json::json!({})).await;
                         });
                     }
+                    "check-updates" => check_for_update(app.clone(), false),
                     "quit" => {
                         app.state::<Shell>().quitting.store(true, Ordering::SeqCst);
                         app.exit(0);
@@ -423,6 +509,16 @@ fn main() {
                         apply_state(&sync_handle, &modes, &state);
                     }
                     tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+            });
+
+            // Once now and then daily: a tray app runs for weeks, and an app
+            // that only ever checked at launch would quietly fall behind.
+            let update_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    check_for_update(update_handle.clone(), true);
+                    tokio::time::sleep(UPDATE_CHECK_EVERY).await;
                 }
             });
 

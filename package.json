@@ -1,6 +1,6 @@
 {
   "name": "desktop-comfyui-server",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "A ComfyUI job runner with a web management UI. Bring your own API-format workflow.",
   "license": "MIT",
   "type": "module",
@@ -11,6 +11,7 @@
     "build:sidecar": "bun run scripts/build-sidecar.ts",
     "app:dev": "tauri dev",
     "app:build": "tauri build",
+    "bump": "bun run scripts/bump-version.ts",
     "check": "oxlint && oxfmt --write",
     "check:ci": "oxlint && oxfmt --check",
     "check-types": "tsc --noEmit",

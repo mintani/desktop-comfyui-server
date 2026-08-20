@@ -1,10 +1,12 @@
 name: CI
 
+# main only receives releases; the work happens on dev and the branches off it.
+# Pull requests are deliberately not filtered: a stacked pull request targets
+# the branch below it in the stack, and those names cannot be listed here.
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
-    branches: [main]
 
 # Cancel an in-flight run when the same branch is pushed again.
 concurrency:

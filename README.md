@@ -37,6 +37,12 @@ fetches WebView2 if the machine does not already have it.
 You also need a [ComfyUI](https://github.com/comfyanonymous/ComfyUI) install —
 the app runs yours, it does not ship one.
 
+Installing is a one-time job: the app checks this repository's releases when it
+starts and once a day after that, asks before installing anything, and restarts
+into the new version. **Check for updates** in the tray menu does the same on
+the spot. Updates are signed, and the app refuses one whose signature does not
+verify.
+
 Settings, job history and uploaded workflows go to
 `%APPDATA%\desktop-comfyui-server`.
 
@@ -50,7 +56,7 @@ is inside. What you can check instead:
 - Everything the app runs is in this repository. There is no separate download
   and no telemetry — it only talks to your ComfyUI and to job servers you add
   yourself.
-- The installers are built by GitHub Actions from the tagged commit, not
+- The installers are built by GitHub Actions from the released commit, not
   uploaded from anyone's machine. The build log for each release is public.
 - It contains exactly two programs: `desktop-comfyui-server.exe`, the window,
   and `comfyui-server.exe`, the server from `src/`. The size is the Bun runtime
@@ -61,22 +67,37 @@ If you would rather not trust a binary at all, it runs from source — see
 
 ## The window
 
-Two pages, because most of the time the app is left alone and only visited to
-change something.
+One tab per subject, so the thing you came to change is a click away rather
+than somewhere down a long page.
 
-**Settings** is where it opens.
+**Workflows** is where it opens: add a workflow, see what each one exposes,
+choose the one used for jobs that do not name one, delete the ones you are
+done with.
 
-- *Upload* / *Installed* — add a workflow, see what each one exposes, choose the
-  one used for jobs that do not name one, delete the ones you are done with
-- *ComfyUI* — where it is installed, and optionally the command to run there
-- *Process* — start and stop ComfyUI, with the tail of its output so a wrong
-  command explains itself
-- *Upstream servers* — add, reorder and disable job servers. The order is the
-  priority
+**ComfyUI** points the app at your install — where it is, and optionally the
+command to run there — and starts and stops it, with the tail of its output so
+a wrong command explains itself. A ComfyUI started here that crashes is started
+again on its own; three crashes in a row right after starting read as a broken
+command, so it stops trying and says why in the log. An *Outputs* panel shows
+how much disk ComfyUI's output folder holds, with a button — and an optional
+standing rule — that deletes files older than a chosen number of days.
+
+**Servers** attaches job servers: link one with a code from its own UI, or fill
+a row in by hand; reorder and disable them here too. The order is the priority.
+
+**Accepting** says when job servers get work out of this machine — a hold for
+the next while, or a daily window. [When it accepts](#when-it-accepts) has the
+details.
 
 **Generate** runs a workflow by hand: a form on one side, the run history on the
 other. Handy for checking a workflow does what you think before a job server
-starts sending work.
+starts sending work. The history narrows by state and by where the job came
+from, and flips into a gallery of everything the filtered runs produced.
+
+A run in flight carries a bar — the steps ComfyUI has done out of the steps it
+expects, and the node it is on — so a slow workflow can be told from a stuck one.
+Jobs claimed from a job server land in the same history, so they get the same
+bar, and the status bar carries the percentage on every page.
 
 The header switches the theme and the language, and the button beside them opens
 the app's own settings — the same switches the tray menu carries.
@@ -106,6 +127,25 @@ answering claims nothing from a job server either, whatever its state says.
 
 The same three are in the tray, so it can be changed with the window closed.
 
+### When it accepts
+
+*Accepting* does not have to mean right now. On the Accepting page:
+
+- **Hold off for** 15, 30 or 60 minutes. The machine stops taking jobs and
+  starts again on its own, which is what you want when the GPU is yours for the
+  next half hour and remembering to switch back is the hard part.
+- **Every day, only between two times.** 02:00 to 08:00 lends the GPU out
+  overnight. An end before the start crosses midnight, so that window is tonight
+  until tomorrow morning rather than an error.
+
+Both only hold jobs back. ComfyUI stays up, runs you start here still go, and
+job servers still see the machine — they simply get nothing out of it until the
+hold is over. The header says which of the two is holding it and the status bar
+says how much is left.
+
+A hold is stored with its end time rather than counted down in memory, so
+restarting the app in the middle of one does not start claiming early.
+
 ## The tray
 
 Closing the window does not stop anything. The app stays in the tray with:
@@ -126,7 +166,7 @@ Both are stored with everything else, so the tray and the page always agree.
 
 ## Pointing it at ComfyUI
 
-On the Settings page, put the folder in *Directory*:
+On the ComfyUI page, put the folder in *Directory*:
 
 | What you installed | What to enter | What gets run |
 | ------------------ | ------------- | ------------- |
@@ -144,7 +184,7 @@ launched can be stopped from the app.
 ## Bring your own workflow
 
 In ComfyUI, turn on **Settings → Lite Graph → Enable Dev mode options**, then
-use **Workflow → Export (API)**. Upload the JSON on the Settings page.
+use **Workflow → Export (API)**. Upload the JSON on the Workflows page.
 
 ComfyUI's API format is a flat map of node id to node, and each node records its
 class and how its inputs are wired. That is enough to find the interesting
@@ -159,9 +199,15 @@ inputs without being told:
 | `length`    | a node with a numeric `length` input (frame count on video workflows) |
 | `frameRate` | a node with a numeric `frame_rate` input                              |
 
-The Settings page shows which of these were found, so a workflow that needs help
+The Workflows page shows which of these were found, so a workflow that needs help
 is obvious before you run it. Anything not found is simply not offered — a
 workflow with no `LoadImage` gets no image field.
+
+*Check* on a workflow's row goes further: it asks the running ComfyUI — via
+`/object_info` — whether every node type in the file exists there, and whether
+every file-choosing input (checkpoints, LoRAs, VAEs, …) names something
+actually installed, without running anything. Inputs the app replaces at run
+time, the input image above all, are left out of the check.
 
 Outputs are not detected in advance. Whatever ComfyUI records in its history for
 the run is collected, so images, videos and gifs all work with no configuration.
@@ -185,10 +231,15 @@ reported in the UI rather than silently ignored.
 
 ## Attaching a job server
 
-Left alone, the app runs standalone. Add a server on the Settings page and it
+Left alone, the app runs standalone. Add a server on the Servers page and it
 also polls for queued jobs, runs them through the active workflow and uploads
 the result — which is the point of the tray: the machine keeps serving with
 nothing on screen.
+
+Each row has a *Test* button. It sends one heartbeat there and then, so a wrong
+secret answers `HTTP 401` immediately instead of looking like an unreachable host
+until the next beat. It tests what is on screen, so a secret you have typed but
+not saved is the one tried; leaving the box blank tests the stored one.
 
 Several can be served at once. They are asked in the order the list puts them,
 so the top of the list is the priority: a server with work queued keeps this
@@ -208,6 +259,17 @@ authenticated with `Authorization: Bearer <secret>`:
 | `POST /jobs/:id/result`    | the produced file, as the raw request body                   |
 | `POST /jobs/:id/complete`  | mark done                                                    |
 | `POST /jobs/:id/fail`      | mark failed, with `{ reason }`                               |
+
+A server may also implement one endpoint outside that block:
+
+| Endpoint                        | Purpose                                                   |
+| ------------------------------- | --------------------------------------------------------- |
+| `POST /api/internal/hosts/link` | trade `{ code }` for `{ hostId, hostSecret, hostName }`    |
+
+That is what *Link* on the Servers page calls. It is unauthenticated because
+the code is the credential: the server issues it, it works once, and it expires.
+A server without it is used the same way as before — fill the host id and secret
+in by hand.
 
 A claimed job looks like:
 
@@ -312,12 +374,10 @@ The server is bundled by `bun build --compile`, which carries the Bun runtime,
 so the sidecar is about 100 MB before compression.
 
 Installers are built by
-[`.github/workflows/release.yml`](.github/workflows/release.yml). Push a tag and
-they appear on a draft release:
-
-```bash
-git tag v0.1.0 && git push origin v0.1.0
-```
+[`.github/workflows/release.yml`](.github/workflows/release.yml). A release is
+the version in `package.json`: bump it — along with `src-tauri/tauri.conf.json`
+and `src-tauri/Cargo.toml`, which have to agree — and when that lands on `main`
+the installers appear on a draft release tagged `v<version>`.
 
 To try a build without announcing one, run the workflow by hand from the Actions
 tab; the installers come back as workflow artifacts instead.
@@ -329,6 +389,10 @@ bun run dev           # reload on change
 bun run check         # oxlint + oxfmt
 bun run check-types   # tsc --noEmit
 ```
+
+Work starts from an issue and lands on `dev`; `main` holds what has been
+released. [`CONTRIBUTING.md`](CONTRIBUTING.md) has the branch, commit and
+release steps.
 
 `src/` is the server and the UI, `src-tauri/` is the desktop shell. The two talk
 over HTTP like any other client, so the shell holds no state of its own — it

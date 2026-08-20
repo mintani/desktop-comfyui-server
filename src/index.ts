@@ -3,6 +3,8 @@ import { startAgent, stopAgent } from "./agent";
 import { startComfyWatch, stopComfy } from "./comfy-process";
 import { COMFY_URL, DATA_DIR, UI_ENABLED, WORKFLOW_DIR } from "./config";
 import { loadJobs } from "./jobs";
+import { startOutputWatch } from "./outputs";
+import { startProgressWatch, stopProgressWatch } from "./progress";
 import { loadSettings } from "./settings";
 import { startStatusPolling } from "./status";
 import { startUi } from "./ui/server";
@@ -36,6 +38,8 @@ if (names.length === 0) {
 
 const statusTimer = startStatusPolling(STATUS_POLL_MS);
 const comfyWatch = startComfyWatch();
+const outputWatch = startOutputWatch();
+startProgressWatch();
 
 if (UI_ENABLED) {
   const server = startUi();
@@ -54,6 +58,8 @@ function shutdown() {
   stopAgent();
   clearInterval(statusTimer);
   clearInterval(comfyWatch);
+  clearInterval(outputWatch);
+  stopProgressWatch();
   void stopComfy();
   process.exit(0);
 }

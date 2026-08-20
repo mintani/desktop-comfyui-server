@@ -1,7 +1,9 @@
+import { MAX_PAUSE_MINUTES, acceptState, isTimeOfDay, pauseUntil } from "../accepting";
 import { agentSnapshot, applyUpstreamChange } from "../agent";
 import { interrupt, uploadImage, viewUrl } from "../comfy";
 import { comfyProcessState, startComfy, stopComfy } from "../comfy-process";
 import { COMFY_URL, UI_HOSTNAME, UI_PORT, UI_TOKEN, WORKFLOW_DIR } from "../config";
+import { listEvents } from "../events";
 import {
   clearFinishedJobs,
   completeJob,
@@ -11,7 +13,17 @@ import {
   removeJob,
   startJob,
 } from "../jobs";
-import { RUN_MODES, loadSettings, newUpstreamId, publicUpstreams, saveSettings } from "../settings";
+import { outputsSnapshot, rescanOutputs, trimOutputs } from "../outputs";
+import { latestProgress } from "../progress";
+import {
+  RUN_MODES,
+  hostFromUrl,
+  loadSettings,
+  newUpstreamId,
+  normaliseCleanupDays,
+  publicUpstreams,
+  saveSettings,
+} from "../settings";
 import { latestStatus, refreshStatus } from "../status";
 import {
   activeWorkflowName,
@@ -23,9 +35,11 @@ import {
   saveWorkflowFile,
   setActiveWorkflow,
 } from "../workflow";
+import { claimLinkCode, testUpstream } from "../upstream";
+import { checkWorkflow } from "../validate";
 import { authorise } from "./guard";
 import index from "./index.html";
-import type { RunMode, UpstreamConfig } from "../settings";
+import type { AcceptSchedule, RunMode, UpstreamConfig } from "../settings";
 import type { RunParams } from "../types";
 
 function message(err: unknown): string {
@@ -47,10 +61,18 @@ async function handleState(): Promise<Response> {
     activeWorkflow: await activeWorkflowName(),
     agent: agentSnapshot(),
     upstreams: publicUpstreams(settings),
-    settings: { comfyDir: settings.comfyDir, comfyCommand: settings.comfyCommand },
+    settings: {
+      comfyDir: settings.comfyDir,
+      comfyCommand: settings.comfyCommand,
+      outputCleanupDays: settings.outputCleanupDays,
+    },
+    outputs: outputsSnapshot(),
     mode: settings.mode,
+    accepting: acceptState(settings),
+    progress: latestProgress(),
     desktop: settings.desktop,
     jobs: listJobs(),
+    events: listEvents(),
   });
 }
 
@@ -90,6 +112,17 @@ async function handleWorkflowUpload(req: Request): Promise<Response> {
 
     const summary = await saveWorkflowFile(name, await file.text());
     return Response.json({ workflow: summary });
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/** Compare one workflow against the running ComfyUI — see `validate.ts`. */
+async function handleWorkflowCheck(req: Request): Promise<Response> {
+  try {
+    const { name } = (await req.json()) as { name?: string };
+    if (!name) return fail("name is required");
+    return Response.json(await checkWorkflow(name));
   } catch (err) {
     return fail(err);
   }
@@ -154,20 +187,140 @@ async function handleUpstreamsSave(req: Request): Promise<Response> {
   }
 }
 
+/**
+ * One heartbeat to a single server, sent now, so a wrong secret says so instead
+ * of looking like an unreachable host until the next scheduled beat.
+ *
+ * The row is taken as it stands on screen: a secret typed but not yet saved is
+ * what gets tested, and a blank one falls back to the stored value — the same
+ * rule the save path uses, so testing and saving cannot disagree about which
+ * secret they mean.
+ */
+async function handleUpstreamTest(req: Request): Promise<Response> {
+  try {
+    const input = (await req.json()) as UpstreamInput;
+    const settings = await loadSettings();
+    const stored = input.id
+      ? settings.upstreams.find((server) => server.id === input.id)
+      : undefined;
+
+    const url = (input.url ?? stored?.url ?? "").trim().replace(/\/$/, "");
+    if (!url) return fail("a URL is needed");
+    const hostId = (input.hostId ?? stored?.hostId ?? "").trim();
+    if (!hostId) return fail("a host id is needed");
+    const secret = (input.secret ?? "").trim() || stored?.secret || "";
+    if (!secret) return fail("a secret is needed");
+
+    const { comfyStatus, queueRunning, queuePending, gpu } = latestStatus();
+    const result = await testUpstream(
+      { name: url, url, hostId, secret },
+      { comfyStatus, queueRunning, queuePending, gpu },
+    );
+    return Response.json(result);
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/**
+ * Link this machine to a job server with a one-time code issued by that
+ * server's own UI.
+ *
+ * The exchange happens here and not in the page for two reasons: the browser
+ * has no CORS grant from a job server it has never spoken to, and the secret
+ * that comes back has no business passing through the UI at all.
+ */
+async function handleLink(req: Request): Promise<Response> {
+  try {
+    const body = (await req.json()) as { url?: string; code?: string };
+    const url = (body.url ?? "").trim().replace(/\/$/, "");
+    const code = (body.code ?? "").trim();
+
+    if (!url) return fail("a server URL is required");
+    if (!/^https?:\/\//i.test(url))
+      return fail("the server URL must start with http:// or https://");
+    if (!code) return fail("a link code is required");
+
+    const linked = await claimLinkCode(url, code);
+
+    // One row per server URL. Linking the same server again replaces the
+    // credentials rather than leaving a second row claiming beside the first.
+    const settings = await loadSettings();
+    const known = settings.upstreams.some((server) => server.url === url);
+    const upstreams = known
+      ? settings.upstreams.map((server) =>
+          server.url === url
+            ? { ...server, hostId: linked.hostId, secret: linked.hostSecret }
+            : server,
+        )
+      : [
+          ...settings.upstreams,
+          {
+            id: newUpstreamId(),
+            name: hostFromUrl(url),
+            url,
+            hostId: linked.hostId,
+            secret: linked.hostSecret,
+            enabled: true,
+          },
+        ];
+
+    const saved = await saveSettings({ upstreams });
+    await applyUpstreamChange();
+
+    return Response.json({
+      upstreams: publicUpstreams(saved),
+      hostName: linked.hostName ?? null,
+      replaced: known,
+    });
+  } catch (err) {
+    return fail(err);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // ComfyUI itself
 // ---------------------------------------------------------------------------
 
 async function handleSettingsSave(req: Request): Promise<Response> {
   try {
-    const body = (await req.json()) as { comfyDir?: string; comfyCommand?: string };
+    const body = (await req.json()) as {
+      comfyDir?: string;
+      comfyCommand?: string;
+      outputCleanupDays?: unknown;
+    };
     const saved = await saveSettings({
       ...(body.comfyDir === undefined ? {} : { comfyDir: body.comfyDir.trim() }),
       ...(body.comfyCommand === undefined ? {} : { comfyCommand: body.comfyCommand.trim() }),
+      ...(body.outputCleanupDays === undefined
+        ? {}
+        : { outputCleanupDays: normaliseCleanupDays(body.outputCleanupDays) }),
     });
+    // A different directory means a different output folder to count.
+    if (body.comfyDir !== undefined) void rescanOutputs();
     return Response.json({
-      settings: { comfyDir: saved.comfyDir, comfyCommand: saved.comfyCommand },
+      settings: {
+        comfyDir: saved.comfyDir,
+        comfyCommand: saved.comfyCommand,
+        outputCleanupDays: saved.outputCleanupDays,
+      },
     });
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/**
+ * Delete outputs older than the given days, right now. The stored rule is the
+ * quiet version of this; the button wants its result in the response.
+ */
+async function handleOutputsTrim(req: Request): Promise<Response> {
+  try {
+    const { days } = (await req.json()) as { days?: unknown };
+    if (typeof days !== "number" || !Number.isFinite(days) || days < 1 || days > 3650) {
+      return fail("days must be a number between 1 and 3650");
+    }
+    return Response.json(await trimOutputs(Math.floor(days)));
   } catch (err) {
     return fail(err);
   }
@@ -202,6 +355,57 @@ async function handleMode(req: Request): Promise<Response> {
       await refreshStatus();
     }
     return Response.json({ mode: saved.mode });
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/**
+ * Hold off claiming for a while, then let it resume on its own. `0` minutes
+ * (or `null`) clears a pause that is still running.
+ *
+ * Deliberately not folded into `/api/mode`: the mode is what someone decided
+ * this machine is for, and a pause is a detour from it that ends by itself.
+ */
+async function handlePause(req: Request): Promise<Response> {
+  try {
+    const { minutes } = (await req.json()) as { minutes?: unknown };
+    const value = minutes === null || minutes === undefined ? 0 : minutes;
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      return fail("minutes must be a number");
+    }
+    if (value < 0 || value > MAX_PAUSE_MINUTES) {
+      return fail(`minutes must be between 0 and ${MAX_PAUSE_MINUTES}`);
+    }
+
+    const saved = await saveSettings({ pauseUntil: pauseUntil(value) });
+    return Response.json({ accepting: acceptState(saved) });
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/**
+ * The daily window. Saved field by field like the desktop switches, so turning
+ * the window on does not need the times sent again, and fixing a time does not
+ * need the switch sent again.
+ */
+async function handleScheduleSave(req: Request): Promise<Response> {
+  try {
+    const body = (await req.json()) as Partial<AcceptSchedule>;
+    const current = (await loadSettings()).schedule;
+
+    if (body.enabled !== undefined && typeof body.enabled !== "boolean") {
+      return fail("enabled must be true or false");
+    }
+    const from = body.from ?? current.from;
+    const to = body.to ?? current.to;
+    if (!isTimeOfDay(from) || !isTimeOfDay(to)) return fail("from and to must be HH:MM");
+
+    const saved = await saveSettings({
+      schedule: { enabled: body.enabled ?? current.enabled, from, to },
+    });
+    return Response.json({ accepting: acceptState(saved) });
   } catch (err) {
     return fail(err);
   }
@@ -408,12 +612,18 @@ export function startUi() {
       "/api/workflows/active": { POST: guarded(handleSetActive) },
       "/api/workflows/reload": { POST: guarded(handleReload) },
       "/api/workflows/upload": { POST: guarded(handleWorkflowUpload) },
+      "/api/workflows/check": { POST: guarded(handleWorkflowCheck) },
       "/api/workflows/delete": { POST: guarded(handleWorkflowDelete) },
 
       "/api/upstreams": { POST: guarded(handleUpstreamsSave) },
+      "/api/upstreams/test": { POST: guarded(handleUpstreamTest) },
+      "/api/link": { POST: guarded(handleLink) },
 
       "/api/settings": { POST: guarded(handleSettingsSave) },
+      "/api/outputs/trim": { POST: guarded(handleOutputsTrim) },
       "/api/mode": { POST: guarded(handleMode) },
+      "/api/accept/pause": { POST: guarded(handlePause) },
+      "/api/accept/schedule": { POST: guarded(handleScheduleSave) },
       "/api/desktop": { POST: guarded(handleDesktopSave) },
       "/api/comfy/start": { POST: guarded(handleComfyStart) },
       "/api/comfy/stop": { POST: guarded(handleComfyStop) },
