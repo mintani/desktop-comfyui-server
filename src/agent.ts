@@ -5,11 +5,13 @@ import {
   AUTO_UPDATE,
   COMFY_URL,
   HEARTBEAT_INTERVAL_MS,
+  JOB_RETRIES,
   POLL_INTERVAL_MS,
+  RETRY_DELAY_MS,
   UPDATE_CHECK_INTERVAL_MS,
 } from "./config";
 import { pushEvent } from "./events";
-import { completeJob, failJob, markQueued, startJob } from "./jobs";
+import { completeJob, failJob, markQueued, noteAttempt, startJob } from "./jobs";
 import { latestStatus, refreshStatus } from "./status";
 import { RESTART_EXIT_CODE, remoteHasUpdate } from "./updater";
 import { loadSettings } from "./settings";
@@ -113,39 +115,64 @@ async function processJob(server: UpstreamServer, claimed: ClaimedJob) {
     workflow: workflowName,
   });
 
-  try {
-    let imageFilename: string | undefined;
-    if (claimed.sourceImageBase64) {
-      const contentType = claimed.sourceImageContentType || "image/png";
-      const ext = contentType.split("/")[1] ?? "png";
-      imageFilename = await uploadImage(
-        COMFY_URL,
-        `input_${claimed.jobId}.${ext}`,
-        contentType,
-        Buffer.from(claimed.sourceImageBase64, "base64"),
+  // A transient failure — a network blip, ComfyUI mid-restart — gets retried
+  // on this machine before the job server hears anything: the job is claimed
+  // and would not be handed out again anyway. Only claimed jobs retry; a run
+  // from the UI has someone watching it, who would not expect a quiet rerun.
+  const tries = 1 + JOB_RETRIES;
+
+  for (let attempt = 1; ; attempt++) {
+    if (attempt > 1) noteAttempt(job, attempt);
+
+    try {
+      let imageFilename: string | undefined;
+      if (claimed.sourceImageBase64) {
+        const contentType = claimed.sourceImageContentType || "image/png";
+        const ext = contentType.split("/")[1] ?? "png";
+        // The name repeats across attempts and the upload overwrites, so a
+        // retry cannot litter ComfyUI's input folder.
+        imageFilename = await uploadImage(
+          COMFY_URL,
+          `input_${claimed.jobId}.${ext}`,
+          contentType,
+          Buffer.from(claimed.sourceImageBase64, "base64"),
+        );
+        console.log(`[worker] uploaded input image → ${imageFilename}`);
+      }
+
+      const outputs = await runWorkflow(
+        workflowName,
+        { ...claimed.params, imageFilename },
+        (promptId) => markQueued(job, promptId),
       );
-      console.log(`[worker] uploaded input image → ${imageFilename}`);
+
+      // Upstreams expect a single artefact. Video workflows also emit preview
+      // images, so prefer a playable file over whatever happens to come first.
+      const primary = outputs.find((output) => output.kind === "video") ?? outputs[0]!;
+      await uploadResult(server, claimed.jobId, primary.url);
+      await reportComplete(server, claimed.jobId);
+
+      completeJob(job, outputs);
+      console.log(`[worker] job ${claimed.jobId} completed`);
+      return;
+    } catch (err) {
+      const reason = message(err);
+
+      if (attempt < tries && running) {
+        console.error(
+          `[worker] job ${claimed.jobId} attempt ${attempt}/${tries} failed: ${reason}` +
+            ` — retrying in ${Math.round(RETRY_DELAY_MS / 1000)} s`,
+        );
+        await idle(RETRY_DELAY_MS);
+        // The agent was stopped mid-wait; report rather than run on regardless.
+        if (running) continue;
+      }
+
+      console.error(`[worker] job ${claimed.jobId} failed: ${reason}`);
+      failJob(job, reason);
+      await reportFailure(server, claimed.jobId, reason);
+      return;
     }
-
-    const outputs = await runWorkflow(
-      workflowName,
-      { ...claimed.params, imageFilename },
-      (promptId) => markQueued(job, promptId),
-    );
-
-    // Upstreams expect a single artefact. Video workflows also emit preview
-    // images, so prefer a playable file over whatever happens to come first.
-    const primary = outputs.find((output) => output.kind === "video") ?? outputs[0]!;
-    await uploadResult(server, claimed.jobId, primary.url);
-    await reportComplete(server, claimed.jobId);
-
-    completeJob(job, outputs);
-    console.log(`[worker] job ${claimed.jobId} completed`);
-  } catch (err) {
-    const reason = message(err);
-    console.error(`[worker] job ${claimed.jobId} failed: ${reason}`);
-    failJob(job, reason);
-    await reportFailure(server, claimed.jobId, reason);
   }
 }
 

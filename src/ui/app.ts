@@ -51,6 +51,8 @@ type JobRecord = {
   promptId?: string;
   outputs?: RunOutput[];
   error?: string;
+  /** Tries this job has had on this machine; absent means the first. */
+  attempts?: number;
   interrupted?: boolean;
 };
 
@@ -735,6 +737,8 @@ function jobEntry(job: JobRecord, withDelete: boolean, progress: State["progress
     </div>
     <p class="meta">${formatTime(job.startedAt)} · ${timing}${origin}${
       job.promptId ? ` · ${t("jobs.prompt", { id: esc(job.promptId.slice(0, 8)) })}` : ""
+    }${
+      job.attempts && job.attempts > 1 ? ` · ${t("jobs.attempt", { count: job.attempts })}` : ""
     }</p>
     ${progressBar(job, progress)}
     ${jobError(job)}
