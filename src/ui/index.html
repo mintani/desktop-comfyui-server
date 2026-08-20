@@ -234,10 +234,20 @@
     <div class="statusbar" id="vitals"></div>
 
     <div class="shell">
-      <!-- Navigation only. Actions and settings live on the pages themselves. -->
+      <!-- Navigation only. Actions and settings live on the pages themselves.
+           One tab per subject, so a page fits on screen instead of scrolling. -->
       <nav class="sidebar" data-i18n-label="nav.label">
-        <a class="nav-item" href="#/settings" data-page-link="settings" data-i18n="nav.settings"
-          >Settings</a
+        <a class="nav-item" href="#/workflows" data-page-link="workflows" data-i18n="nav.workflows"
+          >Workflows</a
+        >
+        <a class="nav-item" href="#/comfyui" data-page-link="comfyui" data-i18n="nav.comfyui"
+          >ComfyUI</a
+        >
+        <a class="nav-item" href="#/servers" data-page-link="servers" data-i18n="nav.servers"
+          >Servers</a
+        >
+        <a class="nav-item" href="#/accepting" data-page-link="accepting" data-i18n="nav.accepting"
+          >Accepting</a
         >
         <a class="nav-item" href="#/generate" data-page-link="generate" data-i18n="nav.generate"
           >Generate</a
@@ -327,7 +337,7 @@
           </div>
         </section>
 
-        <section class="page" data-page="settings">
+        <section class="page" data-page="workflows">
           <section class="panel">
             <div class="panel-head">
               <h2 data-i18n="upload.title">Upload</h2>
@@ -365,7 +375,9 @@
             <div class="panel-head"><h2 data-i18n="workflows.title">Installed</h2></div>
             <div id="workflows"></div>
           </section>
+        </section>
 
+        <section class="page" data-page="comfyui" hidden>
           <section class="panel">
             <div class="panel-head"><h2 data-i18n="comfy.title">ComfyUI</h2></div>
             <form id="settings-form">
@@ -396,7 +408,9 @@
             </div>
             <div id="comfy-process"></div>
           </section>
+        </section>
 
+        <section class="page" data-page="servers" hidden>
           <section class="panel">
             <div class="panel-head">
               <h2 data-i18n="servers.title">Upstream servers</h2>
@@ -437,11 +451,13 @@
               <p class="muted" id="servers-note"></p>
             </div>
           </section>
+        </section>
 
-          <!-- The mode in the header says whether this machine takes work at
-               all. This says when, so nobody has to be sitting here to switch
-               it back. Both only ever hold jobs back — a run started here, and
-               ComfyUI itself, are untouched. -->
+        <!-- The mode in the header says whether this machine takes work at
+             all. This says when, so nobody has to be sitting here to switch
+             it back. Both only ever hold jobs back — a run started here, and
+             ComfyUI itself, are untouched. -->
+        <section class="page" data-page="accepting" hidden>
           <section class="panel">
             <div class="panel-head"><h2 data-i18n="accept.title">Accepting jobs</h2></div>
             <p class="muted" data-i18n="accept.help"></p>

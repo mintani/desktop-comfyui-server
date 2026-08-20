@@ -61,18 +61,23 @@ If you would rather not trust a binary at all, it runs from source — see
 
 ## The window
 
-Two pages, because most of the time the app is left alone and only visited to
-change something.
+One tab per subject, so the thing you came to change is a click away rather
+than somewhere down a long page.
 
-**Settings** is where it opens.
+**Workflows** is where it opens: add a workflow, see what each one exposes,
+choose the one used for jobs that do not name one, delete the ones you are
+done with.
 
-- *Upload* / *Installed* — add a workflow, see what each one exposes, choose the
-  one used for jobs that do not name one, delete the ones you are done with
-- *ComfyUI* — where it is installed, and optionally the command to run there
-- *Process* — start and stop ComfyUI, with the tail of its output so a wrong
-  command explains itself
-- *Upstream servers* — link one with a code from its own UI, or fill a row in
-  by hand; reorder and disable them here too. The order is the priority
+**ComfyUI** points the app at your install — where it is, and optionally the
+command to run there — and starts and stops it, with the tail of its output so
+a wrong command explains itself.
+
+**Servers** attaches job servers: link one with a code from its own UI, or fill
+a row in by hand; reorder and disable them here too. The order is the priority.
+
+**Accepting** says when job servers get work out of this machine — a hold for
+the next while, or a daily window. [When it accepts](#when-it-accepts) has the
+details.
 
 **Generate** runs a workflow by hand: a form on one side, the run history on the
 other. Handy for checking a workflow does what you think before a job server
@@ -81,7 +86,7 @@ starts sending work.
 A run in flight carries a bar — the steps ComfyUI has done out of the steps it
 expects, and the node it is on — so a slow workflow can be told from a stuck one.
 Jobs claimed from a job server land in the same history, so they get the same
-bar, and the status bar carries the percentage on either page.
+bar, and the status bar carries the percentage on every page.
 
 The header switches the theme and the language, and the button beside them opens
 the app's own settings — the same switches the tray menu carries.
@@ -113,8 +118,7 @@ The same three are in the tray, so it can be changed with the window closed.
 
 ### When it accepts
 
-*Accepting* does not have to mean right now. Under *Accepting jobs* on the
-Settings page:
+*Accepting* does not have to mean right now. On the Accepting page:
 
 - **Hold off for** 15, 30 or 60 minutes. The machine stops taking jobs and
   starts again on its own, which is what you want when the GPU is yours for the
@@ -151,7 +155,7 @@ Both are stored with everything else, so the tray and the page always agree.
 
 ## Pointing it at ComfyUI
 
-On the Settings page, put the folder in *Directory*:
+On the ComfyUI page, put the folder in *Directory*:
 
 | What you installed | What to enter | What gets run |
 | ------------------ | ------------- | ------------- |
@@ -169,7 +173,7 @@ launched can be stopped from the app.
 ## Bring your own workflow
 
 In ComfyUI, turn on **Settings → Lite Graph → Enable Dev mode options**, then
-use **Workflow → Export (API)**. Upload the JSON on the Settings page.
+use **Workflow → Export (API)**. Upload the JSON on the Workflows page.
 
 ComfyUI's API format is a flat map of node id to node, and each node records its
 class and how its inputs are wired. That is enough to find the interesting
@@ -184,7 +188,7 @@ inputs without being told:
 | `length`    | a node with a numeric `length` input (frame count on video workflows) |
 | `frameRate` | a node with a numeric `frame_rate` input                              |
 
-The Settings page shows which of these were found, so a workflow that needs help
+The Workflows page shows which of these were found, so a workflow that needs help
 is obvious before you run it. Anything not found is simply not offered — a
 workflow with no `LoadImage` gets no image field.
 
@@ -210,7 +214,7 @@ reported in the UI rather than silently ignored.
 
 ## Attaching a job server
 
-Left alone, the app runs standalone. Add a server on the Settings page and it
+Left alone, the app runs standalone. Add a server on the Servers page and it
 also polls for queued jobs, runs them through the active workflow and uploads
 the result — which is the point of the tray: the machine keeps serving with
 nothing on screen.
@@ -245,7 +249,7 @@ A server may also implement one endpoint outside that block:
 | ------------------------------- | --------------------------------------------------------- |
 | `POST /api/internal/hosts/link` | trade `{ code }` for `{ hostId, hostSecret, hostName }`    |
 
-That is what *Link* on the Settings page calls. It is unauthenticated because
+That is what *Link* on the Servers page calls. It is unauthenticated because
 the code is the credential: the server issues it, it works once, and it expires.
 A server without it is used the same way as before — fill the host id and secret
 in by hand.

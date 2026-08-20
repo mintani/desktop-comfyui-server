@@ -104,7 +104,7 @@ export async function startComfy(): Promise<void> {
 
   const settings = await loadSettings();
   if (!settings.comfyDir) {
-    throw new Error("set the ComfyUI directory on the Settings page first");
+    throw new Error("set the ComfyUI directory on the ComfyUI page first");
   }
   if (!existsSync(settings.comfyDir)) {
     throw new Error(`no such directory: ${settings.comfyDir}`);

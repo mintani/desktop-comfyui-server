@@ -117,7 +117,10 @@ const STRINGS = {
   "desktop.saveFailed": { en: "save failed", ja: "保存できませんでした" },
 
   "nav.label": { en: "Sections", ja: "セクション" },
-  "nav.settings": { en: "Settings", ja: "設定" },
+  "nav.workflows": { en: "Workflows", ja: "ワークフロー" },
+  "nav.comfyui": { en: "ComfyUI", ja: "ComfyUI" },
+  "nav.servers": { en: "Servers", ja: "サーバー" },
+  "nav.accepting": { en: "Accepting", ja: "ジョブ受付" },
   "nav.generate": { en: "Generate", ja: "生成" },
 
   // Status chips ------------------------------------------------------------
@@ -241,8 +244,8 @@ const STRINGS = {
   "comfy.start": { en: "Start ComfyUI", ja: "ComfyUI を起動" },
   "comfy.stop": { en: "Stop ComfyUI", ja: "ComfyUI を停止" },
   "comfy.needsDir": {
-    en: "set the ComfyUI directory on the Settings page first",
-    ja: "先に設定ページで ComfyUI のディレクトリを指定してください",
+    en: "set the ComfyUI directory on the ComfyUI page first",
+    ja: "先に ComfyUI ページでディレクトリを指定してください",
   },
 
   "process.title": { en: "Process", ja: "プロセス" },
