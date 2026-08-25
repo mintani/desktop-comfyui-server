@@ -5,7 +5,7 @@ import type { UpstreamServer } from "./upstream";
 
 /**
  * Keeps the local models/ directory in step with what upstream servers say
- * their workflow presets need (douga-workflow #127).
+ * their workflow presets need.
  *
  * A server hands out a manifest of models (URL + sha256 + destination), this
  * side downloads what is missing, verifies it, and reports what it holds in
@@ -19,7 +19,7 @@ import type { UpstreamServer } from "./upstream";
  */
 
 /** Verified-hash ledger, so a restart does not re-hash tens of gigabytes. */
-const STATE_FILE = ".douga-models.json";
+const STATE_FILE = ".preset-models.json";
 
 export type ManifestModel = {
   filename: string;

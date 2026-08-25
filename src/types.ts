@@ -74,7 +74,7 @@ export type JobRecord = {
 };
 
 /**
- * A workflow shipped inside the claim itself (douga-workflow #127). The JSON is
+ * A workflow shipped inside the claim itself by the upstream server. The JSON is
  * API format; placeholders (`__INPUT_IMAGE__`, `__TRIGGER_WORDS__`, `__SEED__`)
  * are substituted here before queueing.
  */
