@@ -39,13 +39,13 @@ const STRINGS = {
   "mode.label": { en: "Generation", ja: "生成" },
   "mode.accepting": { en: "Accepting", ja: "受付中" },
   "mode.acceptingNote": {
-    en: "Jobs from your job servers, and runs started here.",
-    ja: "ジョブサーバーからの仕事も、ここからの実行も動きます。",
+    en: "Jobs from your job servers run on this machine.",
+    ja: "ジョブサーバーからの仕事を実行します。",
   },
   "mode.local": { en: "Not accepting", ja: "受付停止" },
   "mode.localNote": {
-    en: "Job servers get nothing. ComfyUI stays up for your own runs.",
-    ja: "ジョブサーバーからは受け取りません。ComfyUI はそのまま、自分の実行は動きます。",
+    en: "Job servers get nothing. ComfyUI stays up for your own use.",
+    ja: "ジョブサーバーからは受け取りません。ComfyUI はそのまま使えます。",
   },
   "mode.paused": { en: "Stopped", ja: "停止" },
   "mode.pausedNote": {
@@ -66,8 +66,8 @@ const STRINGS = {
   // When jobs are accepted, on top of the mode -------------------------------
   "accept.title": { en: "Accepting jobs", ja: "ジョブの受付" },
   "accept.help": {
-    en: "When job servers get work out of this machine. Runs you start here, and ComfyUI itself, are not affected.",
-    ja: "ジョブサーバーからの仕事をいつ受けるかの設定です。ここから始める実行と ComfyUI 自体には影響しません。",
+    en: "When job servers get work out of this machine. ComfyUI itself is not affected.",
+    ja: "ジョブサーバーからの仕事をいつ受けるかの設定です。ComfyUI 自体には影響しません。",
   },
   "accept.pauseFor": { en: "Hold off for", ja: "一時停止" },
   "accept.pause15": { en: "15 min", ja: "15分" },
@@ -95,12 +95,12 @@ const STRINGS = {
   "accept.paused": { en: "on hold {minutes}m", ja: "停止中 あと{minutes}分" },
   "accept.outside": { en: "outside the window", ja: "時間帯外" },
   "accept.gatePaused": {
-    en: "Jobs are on hold for another {minutes} min. Runs started here still go.",
-    ja: "あと {minutes} 分はジョブを受けません。ここからの実行は動きます。",
+    en: "Jobs are on hold for another {minutes} min.",
+    ja: "あと {minutes} 分はジョブを受けません。",
   },
   "accept.gateSchedule": {
-    en: "Outside {from}–{to}, so nothing is claimed. Runs started here still go.",
-    ja: "{from}〜{to} の外なのでジョブは受けません。ここからの実行は動きます。",
+    en: "Outside {from}–{to}, so nothing is claimed.",
+    ja: "{from}〜{to} の外なのでジョブは受けません。",
   },
 
   // The desktop menu, mirrored by the tray -----------------------------------
@@ -154,7 +154,7 @@ const STRINGS = {
   "nav.comfyui": { en: "ComfyUI", ja: "ComfyUI" },
   "nav.servers": { en: "Servers", ja: "サーバー" },
   "nav.accepting": { en: "Accepting", ja: "ジョブ受付" },
-  "nav.generate": { en: "Generate", ja: "生成" },
+  "nav.runs": { en: "Runs", ja: "実行履歴" },
 
   // Status chips ------------------------------------------------------------
   "vitals.comfy": { en: "ComfyUI", ja: "ComfyUI" },
@@ -177,45 +177,23 @@ const STRINGS = {
   "comfy.busy": { en: "busy", ja: "実行中" },
   "comfy.unavailable": { en: "unavailable", ja: "停止中" },
 
-  // Run ---------------------------------------------------------------------
-  "run.title": { en: "Run", ja: "実行" },
-  "run.interrupt": { en: "Interrupt", ja: "中断" },
-  "run.workflow": { en: "Workflow", ja: "ワークフロー" },
-  "run.positive": { en: "Positive prompt", ja: "ポジティブプロンプト" },
-  "run.negative": { en: "Negative prompt", ja: "ネガティブプロンプト" },
-  "run.promptPlaceholder": {
-    en: "keep the workflow's own prompt",
-    ja: "ワークフローの内容をそのまま使う",
-  },
-  "run.seed": { en: "Seed", ja: "シード" },
-  "run.random": { en: "random", ja: "ランダム" },
-  "run.seconds": { en: "Seconds", ja: "秒数" },
-  "run.fps": { en: "FPS", ja: "FPS" },
-  "run.default": { en: "default", ja: "既定値" },
-  "run.image": { en: "Input image", ja: "入力画像" },
-  "run.submit": { en: "Run", ja: "実行" },
-  "run.paused": { en: "new work is paused", ja: "新規の受付を停止中です" },
-  "run.queueing": { en: "queueing…", ja: "送信中…" },
-  "run.queued": { en: "queued — it appears in Runs", ja: "送信しました。実行履歴に出ます" },
-  "run.interruptSent": { en: "interrupt sent", ja: "中断を送信しました" },
-  "run.interruptFailed": { en: "interrupt failed", ja: "中断できませんでした" },
-
   // Runs --------------------------------------------------------------------
   "jobs.title": { en: "Runs", ja: "実行履歴" },
+  "jobs.interrupt": { en: "Interrupt", ja: "中断" },
+  "jobs.interruptSent": { en: "interrupt sent", ja: "中断を送信しました" },
+  "jobs.interruptFailed": { en: "interrupt failed", ja: "中断できませんでした" },
   "jobs.clear": { en: "Clear finished", ja: "完了分を削除" },
   "jobs.clearConfirm": {
     en: "Clear every finished job from the history?",
     ja: "完了したジョブを履歴からすべて削除しますか？",
   },
   "jobs.empty": {
-    en: "Nothing has run yet. Fill in the form and press Run.",
-    ja: "まだ何も実行していません。フォームを入力して実行してください。",
+    en: "Nothing has run yet. Jobs claimed from your job servers appear here.",
+    ja: "まだ何も実行していません。ジョブサーバーから受けた仕事がここに出ます。",
   },
   "jobs.running": { en: "running", ja: "実行中" },
   "jobs.succeeded": { en: "succeeded", ja: "成功" },
   "jobs.failed": { en: "failed", ja: "失敗" },
-  "jobs.ui": { en: "UI", ja: "UI" },
-  "jobs.upstream": { en: "upstream", ja: "上流" },
   "jobs.prompt": { en: "prompt {id}", ja: "prompt {id}" },
   "jobs.progress": {
     en: "{percent}% · step {value}/{max}",
@@ -225,7 +203,6 @@ const STRINGS = {
   "jobs.attempt": { en: "attempt {count}", ja: "試行 {count} 回目" },
   "jobs.all": { en: "All", ja: "すべて" },
   "jobs.filterState": { en: "State", ja: "状態" },
-  "jobs.filterSource": { en: "Source", ja: "発生元" },
   "jobs.filterView": { en: "View", ja: "表示" },
   "jobs.listView": { en: "List", ja: "リスト" },
   "jobs.galleryView": { en: "Gallery", ja: "ギャラリー" },
@@ -370,8 +347,8 @@ const STRINGS = {
   },
   "servers.linkFailed": { en: "linking failed", ja: "リンクできませんでした" },
   "servers.empty": {
-    en: "No upstream servers. This machine runs whatever you queue here and nothing else.",
-    ja: "上流サーバーはありません。このマシンはここで入れた分だけを実行します。",
+    en: "No upstream servers. Nothing runs on this machine until one is added.",
+    ja: "上流サーバーはありません。追加するまでこのマシンでは何も実行されません。",
   },
   "servers.save": { en: "Save servers", ja: "サーバー設定を保存" },
   "servers.revert": { en: "Revert", ja: "元に戻す" },
@@ -407,9 +384,6 @@ const STRINGS = {
   // Durations ---------------------------------------------------------------
   "time.seconds": { en: "{seconds}s", ja: "{seconds}秒" },
   "time.minutes": { en: "{minutes}m {seconds}s", ja: "{minutes}分{seconds}秒" },
-
-  /** Appended by CSS to a field the chosen workflow has no slot for. */
-  "field.unused": { en: "unused", ja: "未使用" },
 } satisfies Record<string, Entry>;
 
 export type Key = keyof typeof STRINGS;
@@ -490,10 +464,6 @@ export function onLangChange(listener: () => void): void {
 export function setLang(next: Lang): void {
   current = next;
   document.documentElement.lang = next;
-
-  // The one label CSS writes rather than the DOM, because it is generated
-  // content. Set here so it needs no rule of its own per language.
-  document.documentElement.style.setProperty("--label-unused", `" · ${t("field.unused")}"`);
 
   try {
     localStorage.setItem(STORAGE_KEY, next);

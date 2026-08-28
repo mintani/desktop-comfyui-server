@@ -13,8 +13,8 @@ upstream server setting
 <img width="774" height="374" alt="image" src="https://github.com/user-attachments/assets/cac74acb-4b12-4d5c-82c5-c5881a9bf2a8" />
 
 
-A desktop app that runs your own ComfyUI workflows, starts and stops ComfyUI
-itself, and can hand the GPU to a job server when you are not using it.
+A desktop app that hands your GPU to a job server: it claims queued jobs, runs
+them through your own ComfyUI workflows, and starts and stops ComfyUI itself.
 
 It sits in the tray. Close the window and it keeps working; the tray menu is
 enough to stop ComfyUI or stop taking new jobs without opening anything.
@@ -23,8 +23,8 @@ enough to stop ComfyUI or stop taking new jobs without opening anything.
   app reads the graph to find the prompts, seed, length and input image
 - **Runs ComfyUI for you** — one button, with the tail of its output when the
   command is wrong
-- **Standalone or attached** — useful on its own; point it at one or more job
-  servers when you want it to serve requests from elsewhere
+- **Standalone or attached** — manages ComfyUI on its own; point it at one or
+  more job servers when you want it to serve requests from elsewhere
 - **English and Japanese**, light and dark, remembered per browser
 
 ## Install
@@ -89,15 +89,13 @@ a row in by hand; reorder and disable them here too. The order is the priority.
 the next while, or a daily window. [When it accepts](#when-it-accepts) has the
 details.
 
-**Generate** runs a workflow by hand: a form on one side, the run history on the
-other. Handy for checking a workflow does what you think before a job server
-starts sending work. The history narrows by state and by where the job came
-from, and flips into a gallery of everything the filtered runs produced.
+**Runs** is the history: every job claimed from a job server, narrowed by state
+and flipped into a gallery of everything the filtered runs produced. *Interrupt*
+asks ComfyUI to abort the run in flight.
 
 A run in flight carries a bar — the steps ComfyUI has done out of the steps it
-expects, and the node it is on — so a slow workflow can be told from a stuck one.
-Jobs claimed from a job server land in the same history, so they get the same
-bar, and the status bar carries the percentage on every page.
+expects, and the node it is on — so a slow workflow can be told from a stuck
+one, and the status bar carries the percentage on every page.
 
 The header switches the theme and the language, and the button beside them opens
 the app's own settings — the same switches the tray menu carries.
@@ -107,11 +105,11 @@ the app's own settings — the same switches the tray menu carries.
 Beside *Start ComfyUI* is a dot with three states, picked the way a chat app
 picks a presence.
 
-| | | Jobs from a job server | Runs you start here | ComfyUI |
-| --- | --- | --- | --- | --- |
-| 🟢 | **Accepting** | yes | yes | left alone |
-| 🟡 | **Not accepting** | no | yes | left alone |
-| 🔴 | **Stopped** | no | no | shut down |
+| | | Jobs from a job server | ComfyUI |
+| --- | --- | --- | --- |
+| 🟢 | **Accepting** | yes | left alone |
+| 🟡 | **Not accepting** | no | left alone |
+| 🔴 | **Stopped** | no | shut down |
 
 *Not accepting* is the one worth knowing about. It stops the queue without
 disconnecting from anything: job servers still see the machine, they just get
@@ -138,10 +136,9 @@ The same three are in the tray, so it can be changed with the window closed.
   overnight. An end before the start crosses midnight, so that window is tonight
   until tomorrow morning rather than an error.
 
-Both only hold jobs back. ComfyUI stays up, runs you start here still go, and
-job servers still see the machine — they simply get nothing out of it until the
-hold is over. The header says which of the two is holding it and the status bar
-says how much is left.
+Both only hold jobs back. ComfyUI stays up and job servers still see the
+machine — they simply get nothing out of it until the hold is over. The header
+says which of the two is holding it and the status bar says how much is left.
 
 A hold is stored with its end time rather than counted down in memory, so
 restarting the app in the middle of one does not start claiming early.
@@ -199,9 +196,9 @@ inputs without being told:
 | `length`    | a node with a numeric `length` input (frame count on video workflows) |
 | `frameRate` | a node with a numeric `frame_rate` input                              |
 
-The Workflows page shows which of these were found, so a workflow that needs help
-is obvious before you run it. Anything not found is simply not offered — a
-workflow with no `LoadImage` gets no image field.
+The Workflows page shows which of these were found, so a workflow that needs
+help is obvious before a job server sends work. A parameter whose slot was not
+found is simply ignored — a workflow with no `LoadImage` takes no input image.
 
 *Check* on a workflow's row goes further: it asks the running ComfyUI — via
 `/object_info` — whether every node type in the file exists there, and whether
@@ -231,10 +228,10 @@ reported in the UI rather than silently ignored.
 
 ## Attaching a job server
 
-Left alone, the app runs standalone. Add a server on the Servers page and it
-also polls for queued jobs, runs them through the active workflow and uploads
-the result — which is the point of the tray: the machine keeps serving with
-nothing on screen.
+Left alone, the app only manages ComfyUI. Add a server on the Servers page and
+it polls for queued jobs, runs them through the active workflow and uploads the
+result — which is the point of the tray: the machine keeps serving with nothing
+on screen.
 
 Each row has a *Test* button. It sends one heartbeat there and then, so a wrong
 secret answers `HTTP 401` immediately instead of looking like an unreachable host
