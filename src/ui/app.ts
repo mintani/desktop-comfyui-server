@@ -42,7 +42,6 @@ type RunOutput = {
 
 type JobRecord = {
   id: string;
-  source: "ui" | "upstream";
   origin?: string;
   workflow: string;
   state: "running" | "succeeded" | "failed";
@@ -123,7 +122,7 @@ type State = {
 };
 
 const POLL_MS = 2000;
-const PAGES = ["workflows", "comfyui", "servers", "accepting", "generate"] as const;
+const PAGES = ["workflows", "comfyui", "servers", "accepting", "runs"] as const;
 type Page = (typeof PAGES)[number];
 
 function el<T extends HTMLElement>(id: string): T {
@@ -146,10 +145,7 @@ const nodes = {
   linkCode: el<HTMLInputElement>("link-code"),
   linkNote: el("link-note"),
   jobs: el("jobs"),
-  form: el<HTMLFormElement>("run-form"),
-  select: el<HTMLSelectElement>("run-workflow"),
-  submit: el<HTMLButtonElement>("run-submit"),
-  note: el("run-note"),
+  jobsNote: el("jobs-note"),
   reload: el<HTMLButtonElement>("reload"),
   interrupt: el<HTMLButtonElement>("interrupt"),
   uploadForm: el<HTMLFormElement>("upload-form"),
@@ -316,8 +312,8 @@ function setNote(target: HTMLElement, text: string, isError = false): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Workflows is the landing tab; running a workflow by hand is the sideline.
- * Any hash naming no tab lands there too — the old `#/settings` included.
+ * Workflows is the landing tab. Any hash naming no tab lands there too — the
+ * old `#/settings` and `#/generate` included.
  */
 function currentPage(): Page {
   const hash = location.hash.replace(/^#\/?/, "");
@@ -765,10 +761,9 @@ function progressBar(job: JobRecord, progress: State["progress"]): string {
 
 function jobEntry(job: JobRecord, withDelete: boolean, progress: State["progress"]): string {
   const tone = job.state === "running" ? "run" : job.state === "succeeded" ? "ok" : "bad";
-  const origin =
-    job.source === "upstream"
-      ? ` · ${esc(job.origin ?? t("jobs.upstream"))}`
-      : ` · ${t("jobs.ui")}`;
+  // Which job server the job was claimed from. Rows written by old versions'
+  // in-app run form have no origin, so they simply say nothing.
+  const origin = job.origin ? ` · ${esc(job.origin)}` : "";
   const timing =
     job.state === "running"
       ? `<span data-started="${job.startedAt}">${formatDuration(Date.now() - job.startedAt)}</span>`
@@ -798,11 +793,9 @@ function jobEntry(job: JobRecord, withDelete: boolean, progress: State["progress
 
 // Page-local: the history itself is what it is, only its reading is chosen.
 type JobStateFilter = "all" | JobRecord["state"];
-type JobSourceFilter = "all" | JobRecord["source"];
 type JobsView = "list" | "gallery";
 
 let jobStateFilter: JobStateFilter = "all";
-let jobSourceFilter: JobSourceFilter = "all";
 let jobsView: JobsView = "list";
 
 /**
@@ -835,11 +828,7 @@ function galleryHtml(jobs: JobRecord[]): string {
 }
 
 function renderJobs(state: State): void {
-  const jobs = state.jobs.filter(
-    (job) =>
-      (jobStateFilter === "all" || job.state === jobStateFilter) &&
-      (jobSourceFilter === "all" || job.source === jobSourceFilter),
-  );
+  const jobs = state.jobs.filter((job) => jobStateFilter === "all" || job.state === jobStateFilter);
 
   if (jobsView === "gallery") {
     renderIfChanged(nodes.jobs, "jobs", galleryHtml(jobs));
@@ -1170,58 +1159,6 @@ async function setNotify(on: boolean): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Run form
-// ---------------------------------------------------------------------------
-
-let selectKey = "";
-
-function syncForm(state: State): void {
-  const valid = state.workflows.filter((summary) => summary.valid).map((summary) => summary.name);
-  const key = valid.join(" ");
-
-  // Assigning a value the select has no option for silently blanks it, which
-  // would then read back as "no workflow" — so only ever pick from `valid`.
-  const pick = (...candidates: (string | null)[]): string =>
-    candidates.find((name): name is string => name !== null && valid.includes(name)) ??
-    valid[0] ??
-    "";
-
-  if (key !== selectKey) {
-    selectKey = key;
-    const previous = nodes.select.value;
-    nodes.select.innerHTML = valid
-      .map((name) => `<option value="${esc(name)}">${esc(name)}</option>`)
-      .join("");
-    nodes.select.value = pick(previous, state.activeWorkflow);
-  } else if (!valid.includes(nodes.select.value)) {
-    nodes.select.value = pick(state.activeWorkflow);
-  }
-
-  const paused = state.mode === "paused";
-  nodes.submit.disabled = valid.length === 0 || paused;
-  nodes.submit.title = paused ? t("run.paused") : "";
-
-  const selected = state.workflows.find((summary) => summary.name === nodes.select.value);
-  const slots = selected?.slots;
-
-  for (const field of document.querySelectorAll<HTMLElement>("[data-slot]")) {
-    const slotKey = field.dataset["slot"];
-    if (!slotKey) continue;
-    const present = !slots
-      ? false
-      : slotKey === "seed"
-        ? slots.seed.length > 0
-        : Boolean(slots[slotKey as keyof WorkflowSlots]);
-
-    field.classList.toggle("disabled", !present);
-    // Disabled controls are left out of FormData, which is what we want: a
-    // parameter with no slot must not be sent at all.
-    const input = field.querySelector<HTMLInputElement | HTMLTextAreaElement>("input, textarea");
-    if (input) input.disabled = !present;
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Polling
 // ---------------------------------------------------------------------------
 
@@ -1241,7 +1178,6 @@ function render(state: State): void {
   syncAccepting(state);
   syncDesktop(state);
   syncNotify(state);
-  syncForm(state);
 }
 
 async function poll(): Promise<void> {
@@ -1339,7 +1275,7 @@ onLangChange(() => {
   // Notes report something that has already happened, so they are cleared
   // rather than translated after the fact.
   for (const note of [
-    nodes.note,
+    nodes.jobsNote,
     nodes.uploadNote,
     nodes.settingsNote,
     nodes.serversNote,
@@ -1359,39 +1295,8 @@ onLangChange(() => {
 // Wiring
 // ---------------------------------------------------------------------------
 
-nodes.form.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  nodes.submit.disabled = true;
-  setNote(nodes.note, t("run.queueing"));
-
-  try {
-    const res = await fetch("/api/run", {
-      method: "POST",
-      headers: authHeaders(),
-      body: new FormData(nodes.form),
-    });
-    const body = (await res.json()) as { jobId?: string; error?: string };
-    if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
-    setNote(nodes.note, t("run.queued"));
-  } catch (err) {
-    setNote(nodes.note, err instanceof Error ? err.message : String(err), true);
-  } finally {
-    nodes.submit.disabled = false;
-    void poll();
-  }
-});
-
-// The selector doubles as the active workflow, so upstream jobs follow it too.
-nodes.select.addEventListener("change", async () => {
-  const name = nodes.select.value;
-  if (!name) return;
-  await post("/api/workflows/active", { name });
-  void poll();
-});
-
 nodes.reload.addEventListener("click", async () => {
   await post("/api/workflows/reload");
-  selectKey = "";
   lastHtml.clear();
   setNote(nodes.uploadNote, t("upload.reloaded"));
   void poll();
@@ -1400,8 +1305,8 @@ nodes.reload.addEventListener("click", async () => {
 nodes.interrupt.addEventListener("click", async () => {
   const result = await post("/api/interrupt");
   setNote(
-    nodes.note,
-    result.ok ? t("run.interruptSent") : (result.error ?? t("run.interruptFailed")),
+    nodes.jobsNote,
+    result.ok ? t("jobs.interruptSent") : (result.error ?? t("jobs.interruptFailed")),
     !result.ok,
   );
   void poll();
@@ -1457,7 +1362,6 @@ nodes.workflows.addEventListener("click", async (event) => {
   if (remove && confirm(t("workflows.deleteConfirm", { name: remove }))) {
     const result = await post("/api/workflows/delete", { name: remove });
     if (!result.ok) setNote(nodes.uploadNote, result.error ?? t("workflows.deleteFailed"), true);
-    selectKey = "";
     lastHtml.delete("workflows");
     void poll();
   }
@@ -1588,7 +1492,6 @@ nodes.jobs.addEventListener("click", async (event) => {
 function syncJobFilterButtons(): void {
   const groups: [attribute: string, current: string][] = [
     ["data-job-state", jobStateFilter],
-    ["data-job-source", jobSourceFilter],
     ["data-job-view", jobsView],
   ];
   for (const [attribute, current] of groups) {
@@ -1598,7 +1501,7 @@ function syncJobFilterButtons(): void {
   }
 }
 
-/** The three groups differ only in which variable a click sets. */
+/** The two groups differ only in which variable a click sets. */
 function wireJobFilter(id: string, attribute: string, apply: (value: string) => void): void {
   el(id).addEventListener("click", (event) => {
     const value = (event.target as HTMLElement)
@@ -1613,9 +1516,6 @@ function wireJobFilter(id: string, attribute: string, apply: (value: string) => 
 
 wireJobFilter("jobs-state", "data-job-state", (value) => {
   jobStateFilter = value as JobStateFilter;
-});
-wireJobFilter("jobs-source", "data-job-source", (value) => {
-  jobSourceFilter = value as JobSourceFilter;
 });
 wireJobFilter("jobs-view", "data-job-view", (value) => {
   jobsView = value as JobsView;

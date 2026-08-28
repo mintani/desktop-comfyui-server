@@ -74,10 +74,6 @@
   --control: 2.25rem;
   --control-sm: 1.875rem;
 
-  /* Generated content, so it cannot come from the DOM. The value here is what
-     shows until the i18n module replaces it with the chosen language. */
-  --label-unused: " · unused";
-
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
@@ -581,28 +577,6 @@ button.ghost.square svg {
   display: none;
 }
 
-/* --------------------------------------------------------------------------
-   Workbench — controls on one side, what the machine is doing on the other
-   -------------------------------------------------------------------------- */
-
-.page.workbench {
-  max-width: 76rem;
-}
-
-@media (min-width: 62rem) {
-  .page.workbench {
-    grid-template-columns: minmax(0, 21rem) minmax(0, 1fr);
-    align-items: start;
-  }
-}
-
-.column {
-  display: grid;
-  gap: var(--space-xs);
-  align-content: start;
-  min-width: 0;
-}
-
 .panel {
   min-width: 0;
   padding: var(--space-sm);
@@ -635,15 +609,6 @@ button.ghost.square svg {
   font-size: var(--text-2xs);
   font-weight: 500;
   color: var(--muted-foreground);
-}
-
-.field.disabled {
-  opacity: 0.5;
-}
-
-.field.disabled > span::after {
-  content: var(--label-unused);
-  font-weight: 400;
 }
 
 input,

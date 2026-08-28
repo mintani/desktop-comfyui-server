@@ -129,8 +129,7 @@ async function processJob(server: UpstreamServer, claimed: ClaimedJob) {
 
   // A transient failure — a network blip, ComfyUI mid-restart — gets retried
   // on this machine before the job server hears anything: the job is claimed
-  // and would not be handed out again anyway. Only claimed jobs retry; a run
-  // from the UI has someone watching it, who would not expect a quiet rerun.
+  // and would not be handed out again anyway.
   const tries = 1 + JOB_RETRIES;
 
   for (let attempt = 1; ; attempt++) {

@@ -48,6 +48,7 @@ export type RunParams = {
   fps?: number;
 };
 
+/** "ui" no longer occurs in new jobs; it survives in histories written by older versions. */
 export type JobSource = "ui" | "upstream";
 
 export type JobState = "running" | "succeeded" | "failed";
@@ -55,7 +56,7 @@ export type JobState = "running" | "succeeded" | "failed";
 export type JobRecord = {
   id: string;
   source: JobSource;
-  /** Upstream server name for claimed jobs; undefined for UI test runs. */
+  /** Upstream server the job was claimed from; absent in older histories. */
   origin?: string;
   workflow: string;
   state: JobState;

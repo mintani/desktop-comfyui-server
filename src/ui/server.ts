@@ -1,18 +1,10 @@
 import { MAX_PAUSE_MINUTES, acceptState, isTimeOfDay, pauseUntil } from "../accepting";
 import { agentSnapshot, applyUpstreamChange } from "../agent";
-import { interrupt, uploadImage, viewUrl } from "../comfy";
+import { interrupt, viewUrl } from "../comfy";
 import { comfyProcessState, startComfy, stopComfy } from "../comfy-process";
 import { COMFY_URL, UI_HOSTNAME, UI_PORT, UI_TOKEN, WORKFLOW_DIR } from "../config";
 import { listEvents } from "../events";
-import {
-  clearFinishedJobs,
-  completeJob,
-  failJob,
-  listJobs,
-  markQueued,
-  removeJob,
-  startJob,
-} from "../jobs";
+import { clearFinishedJobs, listJobs, removeJob } from "../jobs";
 import { outputsSnapshot, rescanOutputs, trimOutputs } from "../outputs";
 import { latestProgress } from "../progress";
 import {
@@ -30,8 +22,6 @@ import {
   clearWorkflowCache,
   deleteWorkflowFile,
   listWorkflows,
-  loadWorkflow,
-  runWorkflow,
   saveWorkflowFile,
   setActiveWorkflow,
 } from "../workflow";
@@ -40,7 +30,6 @@ import { checkWorkflow } from "../validate";
 import { authorise } from "./guard";
 import index from "./index.html";
 import type { AcceptSchedule, RunMode, UpstreamConfig } from "../settings";
-import type { RunParams } from "../types";
 
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -491,66 +480,8 @@ function handleJobsClear(): Response {
 }
 
 // ---------------------------------------------------------------------------
-// Running
+// Outputs
 // ---------------------------------------------------------------------------
-
-/**
- * Start a run and return immediately with the job id. Generation takes minutes,
- * far longer than a request should stay open, so progress is read back through
- * `/api/state`.
- */
-async function handleRun(req: Request): Promise<Response> {
-  try {
-    if ((await loadSettings()).mode === "paused") return fail("new work is paused", 409);
-
-    const form = await req.formData();
-
-    const text = (key: string): string | undefined => {
-      const value = form.get(key);
-      return typeof value === "string" && value.trim() !== "" ? value : undefined;
-    };
-    const number = (key: string): number | undefined => {
-      const raw = text(key);
-      if (raw === undefined) return undefined;
-      const parsed = Number(raw);
-      return Number.isFinite(parsed) ? parsed : undefined;
-    };
-
-    const name = text("workflow") ?? (await activeWorkflowName());
-    if (!name) return fail("no workflow selected");
-
-    // Parse before starting anything, so a broken file answers the request with
-    // the reason instead of logging a job that was doomed from the start.
-    await loadWorkflow(name);
-
-    const params: RunParams = {
-      positivePrompt: text("positive"),
-      negativePrompt: text("negative"),
-      seed: number("seed"),
-      seconds: number("seconds"),
-      fps: number("fps"),
-    };
-
-    const image = form.get("image");
-    if (image instanceof File && image.size > 0) {
-      params.imageFilename = await uploadImage(
-        COMFY_URL,
-        image.name || "input.png",
-        image.type || "image/png",
-        new Uint8Array(await image.arrayBuffer()),
-      );
-    }
-
-    const job = startJob({ id: crypto.randomUUID(), source: "ui", workflow: name });
-    void runWorkflow(name, params, (promptId) => markQueued(job, promptId))
-      .then((outputs) => completeJob(job, outputs))
-      .catch((err) => failJob(job, message(err)));
-
-    return Response.json({ jobId: job.id });
-  } catch (err) {
-    return fail(err);
-  }
-}
 
 /**
  * Serve ComfyUI outputs through this process so the UI works when ComfyUI is
@@ -631,7 +562,6 @@ export function startUi() {
       "/api/jobs/delete": { POST: guarded(handleJobDelete) },
       "/api/jobs/clear": { POST: guarded(handleJobsClear) },
 
-      "/api/run": { POST: guarded(handleRun) },
       "/api/interrupt": { POST: guarded(handleInterrupt) },
       "/api/output": { GET: guarded(handleOutput) },
     },
