@@ -27,7 +27,7 @@ import {
 } from "../workflow";
 import { claimLinkCode, testUpstream } from "../upstream";
 import { checkWorkflow } from "../validate";
-import { authorise } from "./guard";
+import { authorise, sessionCookie } from "./guard";
 import index from "./index.html";
 import type { AcceptSchedule, RunMode, UpstreamConfig } from "../settings";
 
@@ -484,6 +484,34 @@ function handleJobsClear(): Response {
 // ---------------------------------------------------------------------------
 
 /**
+ * Hand the page its token as a cookie. The token arrives on this request as a
+ * bearer header — the page got it from the address it was opened with — and
+ * leaves as `HttpOnly`, so from here on nothing running in the page can read
+ * it, and no URL has to carry it.
+ */
+function handleSession(): Response {
+  return Response.json(
+    { ok: true },
+    { headers: UI_TOKEN ? { "Set-Cookie": sessionCookie() } : {} },
+  );
+}
+
+/** ComfyUI's three folders. Anything else is not a place outputs come from. */
+const VIEW_TYPES = new Set(["output", "input", "temp"]);
+
+/**
+ * Types the browser may render inline. Anything else ComfyUI hands back — a
+ * file a workflow wrote, whatever it was — is offered as a download, so it can
+ * never run as a page on this origin. SVG is the one image that can carry a
+ * script when opened on its own, so it is a download too.
+ */
+const INLINE_TYPES = /^(image|video|audio)\/[\w.+-]+$/i;
+
+function servesInline(contentType: string): boolean {
+  return INLINE_TYPES.test(contentType) && contentType.toLowerCase() !== "image/svg+xml";
+}
+
+/**
  * Serve ComfyUI outputs through this process so the UI works when ComfyUI is
  * only reachable from the host. The target is rebuilt from `COMFY_URL` and the
  * three `/view` parameters rather than taken as a URL, which keeps it from
@@ -494,18 +522,25 @@ async function handleOutput(req: Request): Promise<Response> {
   const filename = params.get("filename");
   if (!filename) return fail("filename is required");
 
+  const type = params.get("type") ?? "output";
+  if (!VIEW_TYPES.has(type)) return fail("type must be output, input or temp");
+
   const target = viewUrl(COMFY_URL, {
     filename,
     subfolder: params.get("subfolder") ?? "",
-    type: params.get("type") ?? "output",
+    type,
   });
 
   try {
     const upstream = await fetch(target, { signal: AbortSignal.timeout(60_000) });
+    const served = upstream.headers.get("content-type")?.split(";")[0]?.trim() ?? "";
+    const inline = servesInline(served);
     return new Response(upstream.body, {
       status: upstream.status,
       headers: {
-        "Content-Type": upstream.headers.get("content-type") ?? "application/octet-stream",
+        "Content-Type": inline ? served : "application/octet-stream",
+        ...(inline ? {} : { "Content-Disposition": "attachment" }),
+        "X-Content-Type-Options": "nosniff",
         "Cache-Control": "no-store",
       },
     });
@@ -539,6 +574,7 @@ export function startUi() {
     routes: {
       "/": index,
       "/api/state": { GET: guarded(handleState) },
+      "/api/session": { POST: guarded(handleSession) },
 
       "/api/workflows/active": { POST: guarded(handleSetActive) },
       "/api/workflows/reload": { POST: guarded(handleReload) },

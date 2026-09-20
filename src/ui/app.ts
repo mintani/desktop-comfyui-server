@@ -227,34 +227,44 @@ function minutesLeft(until: number): number {
 }
 
 /**
- * The shared secret, when the server was started with one. Handed over once as
- * `?token=…` on the address, then kept here so the address can be tidied up.
+ * The shared secret, when the server was started with one. It arrives once as
+ * `?token=…` on the address and is traded straight away for an `HttpOnly`
+ * cookie, so nothing in this page holds it afterwards: not a variable, not
+ * storage, not a URL. Older versions kept it in `localStorage`; a token found
+ * there is traded in the same way and then removed.
  */
-const TOKEN_KEY = "ui-token";
+const LEGACY_TOKEN_KEY = "ui-token";
 
-function readToken(): string {
+function takeToken(): string {
   const fromUrl = new URLSearchParams(location.search).get("token");
-  if (fromUrl) {
-    try {
-      localStorage.setItem(TOKEN_KEY, fromUrl);
-    } catch {
-      // Private mode — it lasts for this tab only.
-    }
-    history.replaceState(null, "", location.pathname + location.hash);
-    return fromUrl;
-  }
+  if (fromUrl) history.replaceState(null, "", location.pathname + location.hash);
 
+  let stored = "";
   try {
-    return localStorage.getItem(TOKEN_KEY) ?? "";
+    stored = localStorage.getItem(LEGACY_TOKEN_KEY) ?? "";
+    localStorage.removeItem(LEGACY_TOKEN_KEY);
   } catch {
-    return "";
+    // Private mode — nothing was kept, so there is nothing to trade.
   }
+  return fromUrl || stored;
 }
 
-let token = readToken();
-
-function authHeaders(): Record<string, string> {
-  return token ? { Authorization: `Bearer ${token}` } : {};
+/**
+ * Hand the token to the server and let the cookie it sets carry every request
+ * from here on. Without a token there is nothing to trade; the server either
+ * needs none, or the first poll will say so.
+ */
+async function establishSession(): Promise<void> {
+  const token = takeToken();
+  if (!token) return;
+  try {
+    await fetch("/api/session", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  } catch {
+    // The poll that follows reports the server as unreachable.
+  }
 }
 
 function outputUrl(output: RunOutput): string {
@@ -263,8 +273,6 @@ function outputUrl(output: RunOutput): string {
     subfolder: output.subfolder,
     type: output.type,
   });
-  // An <img> or <video> cannot carry a header, so this one goes in the URL.
-  if (token) query.set("token", token);
   return `/api/output?${query}`;
 }
 
@@ -275,10 +283,7 @@ async function post<T = unknown>(
   try {
     const res = await fetch(path, {
       method: "POST",
-      headers: {
-        ...authHeaders(),
-        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-      },
+      headers: body === undefined ? {} : { "Content-Type": "application/json" },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     const parsed = (await res.json().catch(() => ({}))) as { error?: string } & T;
@@ -565,7 +570,9 @@ function heartbeatFor(state: State, row: ServerRow): string {
   const beat = live.heartbeat;
   if (!beat) return `<span class="state"><span class="dot"></span>${t("servers.waiting")}</span>`;
   const waiting =
-    beat.pendingJobs === undefined ? "" : ` · ${t("servers.queued", { count: beat.pendingJobs })}`;
+    typeof beat.pendingJobs === "number"
+      ? ` · ${t("servers.queued", { count: esc(beat.pendingJobs) })}`
+      : "";
   return `<span class="state"><span class="dot ${beat.ok ? "ok" : "bad"}"></span>${
     beat.ok ? t("servers.up") : t("servers.down")
   }${waiting}</span>`;
@@ -582,10 +589,10 @@ function testResultFor(row: ServerRow): string {
     })}</p>`;
   }
   const queued =
-    row.test.pendingJobs === undefined
-      ? ""
-      : ` · ${t("servers.queued", { count: row.test.pendingJobs })}`;
-  return `<p class="meta">${t("servers.testOk", { ms: row.test.ms })}${queued}</p>`;
+    typeof row.test.pendingJobs === "number"
+      ? ` · ${t("servers.queued", { count: esc(row.test.pendingJobs) })}`
+      : "";
+  return `<p class="meta">${t("servers.testOk", { ms: esc(row.test.ms) })}${queued}</p>`;
 }
 
 function renderServers(state: State): void {
@@ -754,7 +761,7 @@ function progressBar(job: JobRecord, progress: State["progress"]): string {
   return `<div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}">
       <span style="width: ${percent}%"></span>
     </div>
-    <p class="meta">${t("jobs.progress", { percent, value: progress.value, max: progress.max })}${
+    <p class="meta">${t("jobs.progress", { percent, value: esc(progress.value), max: esc(progress.max) })}${
       progress.node ? ` · ${t("jobs.node", { node: esc(progress.node) })}` : ""
     }</p>`;
 }
@@ -1182,7 +1189,7 @@ function render(state: State): void {
 
 async function poll(): Promise<void> {
   try {
-    const res = await fetch("/api/state", { headers: authHeaders() });
+    const res = await fetch("/api/state");
     if (res.status === 401) {
       renderIfChanged(
         nodes.vitals,
@@ -1326,11 +1333,7 @@ nodes.uploadForm.addEventListener("submit", async (event) => {
 
   setNote(nodes.uploadNote, t("upload.uploading"));
   try {
-    const res = await fetch("/api/workflows/upload", {
-      method: "POST",
-      headers: authHeaders(),
-      body: form,
-    });
+    const res = await fetch("/api/workflows/upload", { method: "POST", body: form });
     const body = (await res.json()) as { workflow?: WorkflowSummary; error?: string };
     if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
     setNote(nodes.uploadNote, t("upload.saved", { name: body.workflow?.name ?? "" }));
@@ -1663,5 +1666,8 @@ nodes.notifyEnabled.checked = notifyOn() && notifyGranted();
 applyTheme(currentTheme());
 setLang(lang());
 showPage();
-void poll();
-setInterval(() => void poll(), POLL_MS);
+// The cookie has to be in place before the first request that needs it.
+void establishSession().then(() => {
+  void poll();
+  setInterval(() => void poll(), POLL_MS);
+});
