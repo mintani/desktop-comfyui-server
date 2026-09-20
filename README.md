@@ -283,6 +283,16 @@ There are two ways to add one:
   URL that is already in the list replaces that row's credentials.
 - **By hand.** Type the URL, host id and secret the server gave you.
 
+The URL has to be `https://`. Plain `http://` is accepted only for this machine,
+a private network address or a name without a domain (`http://nas:8080`),
+because the secret is sent as a bearer token on every request and the produced
+files travel the same way.
+
+Adding a server is an act of trust. A job can carry its own workflow, and that
+workflow runs on your ComfyUI with every custom node you have installed, so a
+server you attach can do whatever those nodes can do. Attach servers you run or
+know.
+
 Each row has a *Test* button. It sends one heartbeat there and then, so a wrong
 secret answers `HTTP 401` immediately instead of looking like an unreachable host
 until the next beat. It tests what is on screen, so a secret you have typed but
@@ -468,9 +478,10 @@ Hash the bearer, compare it to the stored hash for that `hostId` in constant
 time, and answer `401` on a mismatch — the app's *Test* button surfaces that
 status directly, which is how a person tells a wrong secret from a wrong URL.
 
-Serve the whole thing over HTTPS. The app accepts `http://` for a server on the
-same trusted network, but the secret travels as a bearer token on every call and
-the produced files travel with it.
+Serve the whole thing over HTTPS. The app refuses a plain `http://` URL unless
+it points at loopback, a private network address or a name without a domain,
+because the secret travels as a bearer token on every call and the produced
+files travel with it.
 
 What the app does after linking: it saves the row (replacing the credentials of
 an existing row with the same URL), restarts its agent, and starts heartbeating
@@ -484,9 +495,10 @@ do a script can do. It is served on `UI_HOSTNAME:UI_PORT`
 
 Every `/api/*` request passes the checks in [Who can reach the
 UI](#who-can-reach-the-ui): a `403` for a disallowed `Host` or a cross-site
-write, a `401` when `UI_TOKEN` is set and missing. The token goes in
-`Authorization: Bearer <token>`, or `?token=` for URLs a browser fetches on its
-own.
+request, a `401` when `UI_TOKEN` is set and missing. A script sends the token
+as `Authorization: Bearer <token>`. The page sends it as the `HttpOnly` cookie
+that `POST /api/session` sets, so an `<img>` needs no header and no URL carries
+the token.
 
 Errors are `{ "error": "<message>" }`, status `400` unless noted. Bodies are
 JSON unless noted. Anything not listed is `404`.
@@ -495,6 +507,7 @@ JSON unless noted. Anything not listed is `404`.
 | ------ | -------------------------- | ---------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------ |
 | GET    | `/`                        | —                                                    | the page                                   | not guarded; static markup                                   |
 | GET    | `/api/state`               | —                                                    | `State` (below)                            | everything the page shows, polled                            |
+| POST   | `/api/session`             | — (token as `Authorization: Bearer`)                 | `{ ok: true }` + `Set-Cookie`              | trades the token for an `HttpOnly; SameSite=Strict` cookie   |
 | POST   | `/api/workflows/upload`    | multipart: `workflow` (file), `name` (optional)      | `{ workflow: WorkflowSummary }`            | refuses non-API-format JSON                                  |
 | POST   | `/api/workflows/active`    | `{ name }`                                           | `{ activeWorkflow }`                       |                                                              |
 | POST   | `/api/workflows/check`     | `{ name }`                                           | `{ ok, problems: string[], checkedNodes }` | needs ComfyUI up                                             |
@@ -514,7 +527,7 @@ JSON unless noted. Anything not listed is `404`.
 | POST   | `/api/desktop`             | `{ autostart?, closeAction? }`                       | `{ desktop }`                              | `closeAction` is `"tray"` or `"quit"`                        |
 | POST   | `/api/jobs/delete`         | `{ id }`                                             | `{ ok: true }`                             | `404` for an unknown id                                      |
 | POST   | `/api/jobs/clear`          | —                                                    | `{ removed }`                              | running jobs stay                                            |
-| GET    | `/api/output`              | `?filename=&subfolder=&type=`                        | the file                                   | proxies ComfyUI `/view`; `502` when it does not answer       |
+| GET    | `/api/output`              | `?filename=&subfolder=&type=`                        | the file                                   | proxies ComfyUI `/view`; `type` is `output`, `input` or `temp`; images, video and audio inline, anything else as a download; `502` when ComfyUI does not answer |
 
 ### `GET /api/state`
 
@@ -605,7 +618,7 @@ Three checks, in `src/ui/guard.ts`, cover `/api/*`:
 | Check | What it stops |
 | ----- | ------------- |
 | **Host** — only IP literals and `localhost` are answered | a rebound domain name reaching the API |
-| **Origin / `Sec-Fetch-Site`** — a cross-site write is refused | a web page you visited driving this UI |
+| **Origin / `Sec-Fetch-Site`** — a cross-site request is refused, reads included | a web page you visited driving this UI, or probing it |
 | **`UI_TOKEN`** — off unless set | anyone else on the network |
 
 Requests with no `Origin` at all — `curl`, a script — are allowed through, since
@@ -618,11 +631,17 @@ The app always sets a fresh `UI_TOKEN` at launch and hands it to its own window
 once, so nothing else on the machine can drive it. Running from source, **set
 `UI_TOKEN` before changing `UI_HOSTNAME`**: generate one with
 `openssl rand -hex 24`, then open the UI once as `http://host:3939/?token=…`.
-The browser keeps it and clears it from the address bar. Starting with a
-non-loopback hostname and no token prints a warning at boot.
+The page trades it for an `HttpOnly` cookie straight away and clears it from
+the address bar, so nothing running in the page can read it afterwards.
+Starting with a non-loopback hostname and no token prints a warning at boot.
+
+The page also carries a Content Security Policy that allows scripts, styles,
+fonts and requests from this server only. The fonts are bundled, so the page
+loads nothing from anywhere else.
 
 Upstream secrets are stored in plain text in `.state.json` under `DATA_DIR`,
-the same way `.env` would hold them. Treat that file like `.env`.
+the same way `.env` would hold them. The file is written readable by its owner
+only; treat it like `.env` all the same.
 
 ## Building it yourself
 
