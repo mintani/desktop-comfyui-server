@@ -61,6 +61,25 @@ function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * The image types ComfyUI's input folder is for, and the extension each gets.
+ * The claim names a type but does not get to name the file: anything else
+ * uploads as PNG, which ComfyUI either reads or rejects, and never as a page.
+ */
+const INPUT_IMAGE_TYPES: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/webp": "webp",
+  "image/gif": "gif",
+};
+
+function inputImageType(declared: string): { contentType: string; ext: string } {
+  const contentType = declared.split(";")[0]?.trim().toLowerCase() ?? "";
+  const ext = INPUT_IMAGE_TYPES[contentType];
+  return ext ? { contentType, ext } : { contentType: "image/png", ext: "png" };
+}
+
 async function sendHeartbeats() {
   const status = await refreshStatus();
   // Which preset models this host holds, verified. The server assigns preset
@@ -138,8 +157,7 @@ async function processJob(server: UpstreamServer, claimed: ClaimedJob) {
     try {
       let imageFilename: string | undefined;
       if (claimed.sourceImageBase64) {
-        const contentType = claimed.sourceImageContentType || "image/png";
-        const ext = contentType.split("/")[1] ?? "png";
+        const { contentType, ext } = inputImageType(claimed.sourceImageContentType);
         // The name repeats across attempts and the upload overwrites, so a
         // retry cannot litter ComfyUI's input folder.
         imageFilename = await uploadImage(
@@ -204,8 +222,7 @@ async function processServerWorkflowJob(
   try {
     let imageFilename: string | undefined;
     if (claimed.sourceImageBase64) {
-      const contentType = claimed.sourceImageContentType || "image/png";
-      const ext = contentType.split("/")[1] ?? "png";
+      const { contentType, ext } = inputImageType(claimed.sourceImageContentType);
       imageFilename = await uploadImage(
         COMFY_URL,
         `input_${claimed.jobId}.${ext}`,

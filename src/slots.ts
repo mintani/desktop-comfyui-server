@@ -78,7 +78,8 @@ export function parseApiWorkflow(raw: unknown): ApiWorkflow {
   const entries = Object.entries(raw as Record<string, unknown>);
   if (entries.length === 0) throw new Error("workflow has no nodes");
 
-  const workflow: ApiWorkflow = {};
+  // No prototype, so a node called `__proto__` or `constructor` is just a node.
+  const workflow: ApiWorkflow = Object.create(null) as ApiWorkflow;
   for (const [id, node] of entries) {
     if (node === null || typeof node !== "object" || Array.isArray(node)) {
       throw new Error(`node "${id}" is not an object`);

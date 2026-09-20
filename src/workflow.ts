@@ -32,14 +32,19 @@ export type WorkflowSummary = {
  */
 const SAFE_NAME = /^[A-Za-z0-9._\-()[\] ]+$/;
 
-function workflowPath(name: string): string {
+function assertSafeName(name: string): void {
   if (!SAFE_NAME.test(name) || name.includes("..")) {
     throw new Error(`invalid workflow name: "${name}"`);
   }
+}
+
+function workflowPath(name: string): string {
+  assertSafeName(name);
   return join(WORKFLOW_DIR, `${name}.json`);
 }
 
 function sidecarPath(name: string): string {
+  assertSafeName(name);
   return join(WORKFLOW_DIR, `${name}.slots.json`);
 }
 
