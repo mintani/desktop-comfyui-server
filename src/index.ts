@@ -52,6 +52,8 @@ startProgressWatch();
 
 if (UI_ENABLED) {
   const server = startUi();
+  // The desktop shell starts this process with `UI_PORT=0` and reads the port
+  // it was given back from this line, so the wording is part of the contract.
   console.log(`[boot] Management UI on http://${server.hostname}:${server.port}`);
 }
 
