@@ -12,9 +12,12 @@ Download Setup from releases
 upstream server setting
 <img width="774" height="374" alt="image" src="https://github.com/user-attachments/assets/cac74acb-4b12-4d5c-82c5-c5881a9bf2a8" />
 
+## What it is
 
-A desktop app that hands your GPU to a job server: it claims queued jobs, runs
-them through your own ComfyUI workflows, and starts and stops ComfyUI itself.
+A desktop app that lends your GPU to a job server. It polls one or more job
+servers for queued work, runs each job through a ComfyUI workflow you exported
+yourself, uploads the result, and starts and stops ComfyUI on this machine so
+the GPU is free when you want it back.
 
 It sits in the tray. Close the window and it keeps working; the tray menu is
 enough to stop ComfyUI or stop taking new jobs without opening anything.
@@ -22,12 +25,21 @@ enough to stop ComfyUI or stop taking new jobs without opening anything.
 - **Your workflows, not bundled ones** — export a workflow from ComfyUI and the
   app reads the graph to find the prompts, seed, length and input image
 - **Runs ComfyUI for you** — one button, with the tail of its output when the
-  command is wrong
-- **Standalone or attached** — manages ComfyUI on its own; point it at one or
-  more job servers when you want it to serve requests from elsewhere
+  command is wrong, and a watchdog that restarts a ComfyUI that crashes
+- **Any job server** — the protocol is a handful of HTTP endpoints, documented
+  below. Link a server with a one-time code, or type its credentials in
+- **Standalone too** — with no server attached it still manages ComfyUI and
+  shows what it is doing
 - **English and Japanese**, light and dark, remembered per browser
 
+The window is a web page served by a plain [Bun](https://bun.com) server in
+`src/`; the desktop shell in `src-tauri/` starts that server and opens a window
+onto it. Both talk over the same HTTP API, so the server also runs on its own,
+on a headless box or from source.
+
 ## Install
+
+### The desktop app (Windows)
 
 Download the `*-setup.exe` from
 [Releases](https://github.com/mintani/desktop-comfyui-server/releases) and run
@@ -46,8 +58,6 @@ verify.
 Settings, job history and uploaded workflows go to
 `%APPDATA%\desktop-comfyui-server`.
 
-### About that Windows warning
-
 **The installer is not code signed**, so Windows shows *"Windows protected your
 PC"* — choose **More info → Run anyway**. Signing needs a paid certificate;
 until there is one, every download will do this, and it says nothing about what
@@ -62,10 +72,44 @@ is inside. What you can check instead:
   and `comfyui-server.exe`, the server from `src/`. The size is the Bun runtime
   compiled into the second one.
 
-If you would rather not trust a binary at all, it runs from source — see
-[Without the app](#without-the-app).
+### From source (any OS)
 
-## The window
+The server runs without the desktop shell. Needs Bun 1.3 or newer and nothing
+else — there are no runtime dependencies.
+
+```bash
+bun install
+cp .env.example .env    # optional; the defaults work locally
+bun start
+```
+
+Open <http://127.0.0.1:3939>. Everything below works the same, minus the tray
+and the settings that belong to it.
+
+Every variable is optional. See [`.env.example`](.env.example) for the full list
+with comments; the ones you are most likely to touch:
+
+| Variable      | Default                 | Meaning                                    |
+| ------------- | ----------------------- | ------------------------------------------ |
+| `COMFY_URL`   | `http://localhost:8188` | ComfyUI on this machine                    |
+| `COMFY_DIR`   | unset                   | where ComfyUI is installed                 |
+| `UI_PORT`     | `3939`                  | management UI port                         |
+| `UI_HOSTNAME` | `127.0.0.1`             | set to `0.0.0.0` to reach it from the LAN  |
+| `UI_TOKEN`    | unset                   | shared secret for the UI                   |
+| `WORKFLOW`    | first file found        | workflow used at startup                   |
+| `UI_ENABLED`  | `true`                  | set `false` to run headless                |
+| `DATA_DIR`    | this directory          | where workflows and state are written      |
+
+`COMFY_DIR` and the `SERVER_n_*` blocks only seed the settings file. Once you
+save either from the UI the stored value takes over and the variable is ignored.
+
+The desktop app sets `DATA_DIR`, `UI_PORT` and `UI_TOKEN` itself, so these
+matter only when running from source. **Set `UI_TOKEN` before changing
+`UI_HOSTNAME`** — see [Who can reach the UI](#who-can-reach-the-ui).
+
+## Using it
+
+### The window
 
 One tab per subject, so the thing you came to change is a click away rather
 than somewhere down a long page.
@@ -86,8 +130,7 @@ standing rule — that deletes files older than a chosen number of days.
 a row in by hand; reorder and disable them here too. The order is the priority.
 
 **Accepting** says when job servers get work out of this machine — a hold for
-the next while, or a daily window. [When it accepts](#when-it-accepts) has the
-details.
+the next while, or a daily window.
 
 **Runs** is the history: every job claimed from a job server, narrowed by state
 and flipped into a gallery of everything the filtered runs produced. *Interrupt*
@@ -143,7 +186,7 @@ says which of the two is holding it and the status bar says how much is left.
 A hold is stored with its end time rather than counted down in memory, so
 restarting the app in the middle of one does not start claiming early.
 
-## The tray
+### The tray
 
 Closing the window does not stop anything. The app stays in the tray with:
 
@@ -152,6 +195,7 @@ Closing the window does not stop anything. The app stays in the tray with:
 | **Open** | brings the window back |
 | **Generation** | the three states above, *Stopped* asking first |
 | **Stop ComfyUI** | stops the ComfyUI this app started |
+| **Check for updates** | asks GitHub for a newer release now |
 | **Quit** | stops the app and its server |
 
 Two things are set from the app's settings button rather than the tray:
@@ -161,7 +205,7 @@ Two things are set from the app's settings button rather than the tray:
 
 Both are stored with everything else, so the tray and the page always agree.
 
-## Pointing it at ComfyUI
+### Pointing it at ComfyUI
 
 On the ComfyUI page, put the folder in *Directory*:
 
@@ -178,7 +222,7 @@ If ComfyUI is already running when the app starts, that is fine — the app
 notices it and simply does not claim to have started it. Only a ComfyUI the app
 launched can be stopped from the app.
 
-## Bring your own workflow
+### Bring your own workflow
 
 In ComfyUI, turn on **Settings → Lite Graph → Enable Dev mode options**, then
 use **Workflow → Export (API)**. Upload the JSON on the Workflows page.
@@ -209,10 +253,8 @@ time, the input image above all, are left out of the check.
 Outputs are not detected in advance. Whatever ComfyUI records in its history for
 the run is collected, so images, videos and gifs all work with no configuration.
 
-### When detection gets it wrong
-
-Put the mapping in a sidecar named after the workflow, `<workflow>.slots.json`,
-beside it in the workflows folder:
+When detection gets it wrong, put the mapping in a sidecar named after the
+workflow, `<workflow>.slots.json`, beside it in the workflows folder:
 
 ```json
 {
@@ -233,6 +275,24 @@ it polls for queued jobs, runs them through the active workflow and uploads the
 result — which is the point of the tray: the machine keeps serving with nothing
 on screen.
 
+There are two ways to add one:
+
+- **Link.** The job server's own UI issues a short-lived, one-time code. Paste
+  the server's URL and that code, and the app fetches its host id and secret
+  from the server itself; nothing secret is shown or copied by hand. Linking a
+  URL that is already in the list replaces that row's credentials.
+- **By hand.** Type the URL, host id and secret the server gave you.
+
+The URL has to be `https://`. Plain `http://` is accepted only for this machine,
+a private network address or a name without a domain (`http://nas:8080`),
+because the secret is sent as a bearer token on every request and the produced
+files travel the same way.
+
+Adding a server is an act of trust. A job can carry its own workflow, and that
+workflow runs on your ComfyUI with every custom node you have installed, so a
+server you attach can do whatever those nodes can do. Attach servers you run or
+know.
+
 Each row has a *Test* button. It sends one heartbeat there and then, so a wrong
 secret answers `HTTP 401` immediately instead of looking like an unreachable host
 until the next beat. It tests what is on screen, so a secret you have typed but
@@ -242,89 +302,309 @@ Several can be served at once. They are asked in the order the list puts them,
 so the top of the list is the priority: a server with work queued keeps this
 machine until it runs dry, and only then does the next one get a turn.
 
-[super-stylish-studio](https://github.com/mintani/super-stylish-studio) is one
-such server: a queue and a web studio on Cloudflare Workers, built for this. Any
-server implementing the endpoints below works just as well.
-
-The protocol is five endpoints under `/api/internal/hosts/:hostId`, all
-authenticated with `Authorization: Bearer <secret>`:
-
-| Endpoint                   | Purpose                                                      |
-| -------------------------- | ------------------------------------------------------------ |
-| `POST /heartbeat`          | report ComfyUI status; may reply `{ pendingJobs }`           |
-| `POST /jobs/claim`         | take the next job, or `204` when there is nothing to do      |
-| `POST /jobs/:id/result`    | the produced file, as the raw request body                   |
-| `POST /jobs/:id/complete`  | mark done                                                    |
-| `POST /jobs/:id/fail`      | mark failed, with `{ reason }`                               |
-
-A server may also implement one endpoint outside that block:
-
-| Endpoint                        | Purpose                                                   |
-| ------------------------------- | --------------------------------------------------------- |
-| `POST /api/internal/hosts/link` | trade `{ code }` for `{ hostId, hostSecret, hostName }`    |
-
-That is what *Link* on the Servers page calls. It is unauthenticated because
-the code is the credential: the server issues it, it works once, and it expires.
-A server without it is used the same way as before — fill the host id and secret
-in by hand.
-
-A claimed job looks like:
-
-```json
-{
-  "jobId": "…",
-  "userId": "…",
-  "sourceImageBase64": "…",
-  "sourceImageContentType": "image/png",
-  "workflow": "my-video",
-  "params": { "positivePrompt": "…", "seed": 42, "seconds": 5 }
-}
-```
-
-`workflow` and `params` are optional; without them the active workflow runs with
-its own values and a random seed.
-
 Because ComfyUI is a single machine, jobs are always run one at a time. Switch
 to *Not accepting* and nothing more is claimed, while the job in flight
 finishes.
 
-## Without the app
+Any server that implements the protocol below works.
 
-The window is a window onto a plain server. That server runs on its own, which
-is what you want on a headless box, or if you would rather not run a binary
-someone else built:
+## Job server protocol
 
-```bash
-bun install
-cp .env.example .env    # optional; the defaults work locally
-bun start
+This is what the app speaks to a job server. Every request is sent by the app;
+the server only answers. All paths except `link` sit under
+`/api/internal/hosts/:hostId` and carry `Authorization: Bearer <hostSecret>`.
+Bodies are JSON unless noted. Any non-2xx answer is a failure; where the server
+has a reason, `{ "error": "…" }` is the shape the app knows how to show.
+
+| Method | Path                       | Body sent                          | Answer expected                        | Timeout | When                          |
+| ------ | -------------------------- | ---------------------------------- | -------------------------------------- | ------- | ----------------------------- |
+| POST   | `/api/internal/hosts/link` | `{ code }`                         | `{ hostId, hostSecret, hostName? }`    | 15 s    | once, from *Link*             |
+| POST   | `/heartbeat`               | `HostStatus` (below)               | `{ pendingJobs? }`                     | 10 s    | every 30 s, and from *Test*   |
+| POST   | `/jobs/claim`              | —                                  | `ClaimedJob` (below), or `204` if idle | 10 s    | every 5 s while accepting     |
+| POST   | `/jobs/:jobId/result`      | the produced file, raw             | any 2xx                                | 120 s   | after a run succeeds          |
+| POST   | `/jobs/:jobId/complete`    | —                                  | any 2xx                                | 10 s    | after `result` is accepted    |
+| POST   | `/jobs/:jobId/fail`        | `{ reason }`                       | any 2xx                                | 10 s    | when a run gives up           |
+| GET    | `/manifest`                | —                                  | `Manifest` (below), or `404`           | 15 s    | at start, then every 10 min   |
+| PUT    | `/object-info`             | ComfyUI's `/object_info` JSON      | any 2xx, or `404`                      | 60 s    | with the manifest sync        |
+
+`manifest` and `object-info` are optional: a `404` from either is taken as "this
+server does not do that" and nothing is logged. The other six are the protocol;
+without `link` the server can still be added by hand.
+
+### Heartbeat
+
+```jsonc
+{
+  "comfyStatus": "available",       // "available" | "busy" | "unavailable"
+  "queueRunning": 0,
+  "queuePending": 0,
+  "gpu": {                          // null when ComfyUI is down or has no GPU
+    "name": "NVIDIA GeForce RTX 4090",
+    "vramTotal": 25757220864,       // bytes
+    "vramFree": 21474836480
+  },
+  "readyModels": ["checkpoints/foo.safetensors"]   // see Manifest; absent from *Test*
+}
 ```
 
-Open <http://127.0.0.1:3939>. Everything above works the same, minus the tray
-and the settings that belong to it. Needs [Bun](https://bun.com) 1.3 or newer
-and nothing else — there are no runtime dependencies.
+Heartbeats keep going whatever the run mode says, so the server always sees
+whether the host is alive; the mode only decides whether `claim` is called. The
+answer's `pendingJobs`, if present, is shown in the UI.
 
-### Configuration
+### Claim
 
-Every variable is optional. See [`.env.example`](.env.example) for the full list
-with comments; the ones you are most likely to touch:
+`204 No Content` means nothing to do. Otherwise:
 
-| Variable      | Default                 | Meaning                                    |
-| ------------- | ----------------------- | ------------------------------------------ |
-| `COMFY_URL`   | `http://localhost:8188` | ComfyUI on this machine                    |
-| `COMFY_DIR`   | unset                   | where ComfyUI is installed                 |
-| `UI_PORT`     | `3939`                  | management UI port                         |
-| `UI_HOSTNAME` | `127.0.0.1`             | set to `0.0.0.0` to reach it from the LAN  |
-| `UI_TOKEN`    | unset                   | shared secret for the UI                   |
-| `WORKFLOW`    | first file found        | workflow used at startup                   |
-| `UI_ENABLED`  | `true`                  | set `false` to run headless                |
-| `DATA_DIR`    | this directory          | where workflows and state are written      |
+```jsonc
+{
+  "jobId": "…",
+  "userId": "…",
+  "sourceImageBase64": "…",              // "" for no input image
+  "sourceImageContentType": "image/png",
+  "params": {                            // optional; every field optional
+    "positivePrompt": "…",
+    "negativePrompt": "…",
+    "seed": 42,
+    "seconds": 5,
+    "fps": 16
+  },
+  "workflow": "my-video"                 // optional, see below
+}
+```
 
-`COMFY_DIR` and the `SERVER_n_*` blocks only seed the settings file. Once you
-save either from the UI the stored value takes over and the variable is ignored.
+`workflow` picks what runs:
 
-The app sets `DATA_DIR`, `UI_PORT` and `UI_TOKEN` itself, so these matter only
-when running from source.
+- **absent or `null`** — the workflow marked active on the Workflows page.
+- **a string** — a workflow file of that name in the host's workflows folder.
+- **an object** `{ "presetId", "workflowJson", "triggerWords" }` — the server
+  ships the workflow itself. `workflowJson` is an API-format workflow as a
+  string; before it is queued the host replaces the literal input values
+  `"__INPUT_IMAGE__"` (the uploaded image's filename), `"__SEED__"` (a random
+  seed) and every occurrence of `__TRIGGER_WORDS__` inside a string
+  (`triggerWords`, or empty when `null`). `params` is ignored for these.
+
+`params` fields are written into the slots detected in a local workflow; a field
+whose slot the workflow lacks is dropped. `seconds` becomes a frame count using
+`fps`, falling back to the workflow's own frame rate and then to 16. A missing
+`seed` is randomised.
+
+A job runs once on this machine for a server-shipped workflow and up to three
+times for a local one (transient failures are retried here, 10 s apart, before
+the server hears anything). A single run is abandoned after 10 minutes.
+
+### Result, complete, fail
+
+When a run succeeds the host picks one file — a video if the run produced one,
+otherwise the first output — and `POST`s its bytes to `/jobs/:jobId/result` with
+the `Content-Type` ComfyUI served it with. Then it calls `/complete`. If either
+call is refused, the job is reported to `/fail` instead, so a server never sees a
+job stay assigned forever.
+
+`/fail` carries `{ "reason": "<message>" }`, the same text the Runs page shows.
+
+### Manifest
+
+A server that wants jobs to run against particular model files can publish
+them. The host downloads what it lacks into ComfyUI's `models/<dest>/<filename>`,
+verifies the SHA-256, and from then on lists that model in every heartbeat's
+`readyModels` as `"<dest>/<filename>"`. A server can use that list to hand a
+preset only to hosts that hold its models.
+
+```jsonc
+{
+  "presets": [
+    {
+      "id": "anime-v1",
+      "name": "Anime v1",
+      "models": [
+        {
+          "filename": "foo.safetensors",
+          "url": "https://…/foo.safetensors",
+          "sha256": "<64 hex chars>",
+          "sizeBytes": 2132625894,
+          "dest": "checkpoints"           // a folder directly under models/
+        }
+      ]
+    }
+  ]
+}
+```
+
+`filename` and `dest` must be single path segments; anything with a separator
+or made of dots is rejected. `PUT /object-info` follows the same sync and
+carries ComfyUI's `/object_info` verbatim (several megabytes), only when its
+content changed, so a server can build a workflow editor's node palette from
+what the host actually has installed.
+
+## Implementing *Link* in your own job server
+
+*Link* exists so a person never handles the host secret. Your server's UI shows
+a code; the person pastes it, with your URL, into the app; the app exchanges the
+code for credentials over the network and stores them. Three pieces:
+
+**1. Issue a code.** When someone adds a host in your UI, create the host record
+(a fresh `hostId`, a display name) and a code for it. The code is what a person
+reads off a screen and types, so keep it short — six to eight characters from an
+unambiguous alphabet is plenty when it expires quickly. Store the code, its
+`hostId`, an expiry (ten minutes is generous) and a used flag. Show the code
+and your server's base URL.
+
+**2. Answer `POST /api/internal/hosts/link`.** It is unauthenticated: the code
+is the credential.
+
+```jsonc
+// request
+{ "code": "K7M2-Q9XD" }
+
+// 200
+{ "hostId": "host_01HZ…", "hostSecret": "<random, ≥ 32 bytes, hex or base64>", "hostName": "studio-pc" }
+
+// 4xx — the app shows `error` to the person verbatim
+{ "error": "that code has expired" }
+```
+
+Look the code up; refuse it when unknown, expired or already used, and mark it
+used in the same step as you read it so two hosts cannot both claim one. Then
+generate the secret, store only a hash of it against the `hostId`, and return
+the secret once in this response. `hostName` is optional; when present the app
+shows *linked as \<hostName\>* and otherwise falls back to the URL's host.
+
+Rate-limit this endpoint by client address — a short code is only safe because
+guessing is slow and the code dies in minutes.
+
+**3. Check the secret everywhere else.** Every request under
+`/api/internal/hosts/:hostId/…` carries `Authorization: Bearer <hostSecret>`.
+Hash the bearer, compare it to the stored hash for that `hostId` in constant
+time, and answer `401` on a mismatch — the app's *Test* button surfaces that
+status directly, which is how a person tells a wrong secret from a wrong URL.
+
+Serve the whole thing over HTTPS. The app refuses a plain `http://` URL unless
+it points at loopback, a private network address or a name without a domain,
+because the secret travels as a bearer token on every call and the produced
+files travel with it.
+
+What the app does after linking: it saves the row (replacing the credentials of
+an existing row with the same URL), restarts its agent, and starts heartbeating
+and claiming immediately.
+
+## Management API
+
+The window is a client of this API and nothing more, so anything the window can
+do a script can do. It is served on `UI_HOSTNAME:UI_PORT`
+(`127.0.0.1:3939` by default; the desktop app picks a free port at launch).
+
+Every `/api/*` request passes the checks in [Who can reach the
+UI](#who-can-reach-the-ui): a `403` for a disallowed `Host` or a cross-site
+request, a `401` when `UI_TOKEN` is set and missing. A script sends the token
+as `Authorization: Bearer <token>`. The page sends it as the `HttpOnly` cookie
+that `POST /api/session` sets, so an `<img>` needs no header and no URL carries
+the token.
+
+Errors are `{ "error": "<message>" }`, status `400` unless noted. Bodies are
+JSON unless noted. Anything not listed is `404`.
+
+| Method | Path                       | Request                                              | Response                                   | Notes                                                        |
+| ------ | -------------------------- | ---------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------ |
+| GET    | `/`                        | —                                                    | the page                                   | not guarded; static markup                                   |
+| GET    | `/api/state`               | —                                                    | `State` (below)                            | everything the page shows, polled                            |
+| POST   | `/api/session`             | — (token as `Authorization: Bearer`)                 | `{ ok: true }` + `Set-Cookie`              | trades the token for an `HttpOnly; SameSite=Strict` cookie   |
+| POST   | `/api/workflows/upload`    | multipart: `workflow` (file), `name` (optional)      | `{ workflow: WorkflowSummary }`            | refuses non-API-format JSON                                  |
+| POST   | `/api/workflows/active`    | `{ name }`                                           | `{ activeWorkflow }`                       |                                                              |
+| POST   | `/api/workflows/check`     | `{ name }`                                           | `{ ok, problems: string[], checkedNodes }` | needs ComfyUI up                                             |
+| POST   | `/api/workflows/delete`    | `{ name }`                                           | `{ ok: true }`                             | removes the sidecar too                                      |
+| POST   | `/api/workflows/reload`    | —                                                    | `{ ok: true }`                             | drops the parse cache                                        |
+| POST   | `/api/upstreams`           | `{ upstreams: UpstreamInput[] }`                     | `{ upstreams: PublicUpstream[] }`          | whole list; order is priority; blank `secret` keeps stored   |
+| POST   | `/api/upstreams/test`      | `UpstreamInput`                                      | `{ ok, ms, pendingJobs?, error? }`         | one heartbeat, now                                           |
+| POST   | `/api/link`                | `{ url, code }`                                      | `{ upstreams, hostName, replaced }`        | `url` must start with `http://` or `https://`                |
+| POST   | `/api/settings`            | `{ comfyDir?, comfyCommand?, outputCleanupDays? }`   | `{ settings }`                             | only the fields sent change                                  |
+| POST   | `/api/comfy/start`         | —                                                    | `{ ok: true }`                             | error when already running or unconfigured                   |
+| POST   | `/api/comfy/stop`          | —                                                    | `{ ok: true }`                             | `500` on failure                                             |
+| POST   | `/api/interrupt`           | —                                                    | `{ ok: true }`                             | forwards to ComfyUI; `502` when it does not answer           |
+| POST   | `/api/outputs/trim`        | `{ days }` 1–3650                                    | `{ removedFiles, removedBytes }`           | deletes now                                                  |
+| POST   | `/api/mode`                | `{ mode }`                                           | `{ mode }`                                 | `409` while ComfyUI is unavailable; `paused` stops ComfyUI   |
+| POST   | `/api/accept/pause`        | `{ minutes }` 0–1440, `null` or `0` clears           | `{ accepting: AcceptState }`               |                                                              |
+| POST   | `/api/accept/schedule`     | `{ enabled?, from?, to? }` (`HH:MM`)                 | `{ accepting: AcceptState }`               | field by field                                               |
+| POST   | `/api/desktop`             | `{ autostart?, closeAction? }`                       | `{ desktop }`                              | `closeAction` is `"tray"` or `"quit"`                        |
+| POST   | `/api/jobs/delete`         | `{ id }`                                             | `{ ok: true }`                             | `404` for an unknown id                                      |
+| POST   | `/api/jobs/clear`          | —                                                    | `{ removed }`                              | running jobs stay                                            |
+| GET    | `/api/output`              | `?filename=&subfolder=&type=`                        | the file                                   | proxies ComfyUI `/view`; `type` is `output`, `input` or `temp`; images, video and audio inline, anything else as a download; `502` when ComfyUI does not answer |
+
+### `GET /api/state`
+
+```ts
+{
+  comfy: {
+    url: string;
+    comfyStatus: "available" | "busy" | "unavailable";
+    queueRunning: number; queuePending: number;
+    gpu: { name: string; vramTotal: number; vramFree: number } | null;
+    checkedAt: number;                       // ms epoch, like every timestamp here
+  };
+  comfyProcess: {
+    managed: boolean; pid: number | null; startedAt: number | null;
+    error: string | null; log: string[];     // last 40 lines of ComfyUI's output
+    command: string; dir: string;
+  };
+  workflows: WorkflowSummary[];
+  workflowDir: string;
+  activeWorkflow: string | null;
+  agent: {
+    running: boolean; autoUpdate: boolean;
+    upstreams: { name: string; url: string; hostId: string;
+                 heartbeat: { ok: boolean; at: number; pendingJobs?: number } | null }[];
+  };
+  upstreams: PublicUpstream[];
+  settings: { comfyDir: string; comfyCommand: string; outputCleanupDays: number };
+  outputs: { dir: string; files: number; bytes: number; scannedAt: number } | null;
+  mode: "accepting" | "local" | "paused";
+  accepting: AcceptState;
+  progress: { promptId: string; value: number; max: number; node: string | null; at: number } | null;
+  desktop: { autostart: boolean; closeAction: "tray" | "quit" };
+  jobs: JobRecord[];                         // newest first, at most 200
+  events: UiEvent[];                         // at most 20, oldest dropped
+}
+```
+
+The shapes it refers to:
+
+```ts
+WorkflowSummary = { name: string; valid: boolean; error?: string; nodeCount?: number;
+                    slots?: WorkflowSlots; overridden?: string[] };
+WorkflowSlots   = { image: Slot | null; positive: Slot | null; negative: Slot | null;
+                    seed: Slot[]; length: Slot | null; frameRate: Slot | null };
+Slot            = { nodeId: string; input: string; label: string };
+
+UpstreamInput   = { id?: string; name?: string; url?: string; hostId?: string;
+                    secret?: string; enabled?: boolean };
+PublicUpstream  = { id: string; name: string; url: string; hostId: string;
+                    enabled: boolean; hasSecret: boolean };   // the secret itself is never returned
+
+AcceptState     = { accepting: boolean; blockedBy: "mode" | "paused" | "schedule" | null;
+                    pausedUntil: number | null;
+                    schedule: { enabled: boolean; from: string; to: string } };
+
+JobRecord       = { id: string; source: "ui" | "upstream"; origin?: string; workflow: string;
+                    state: "running" | "succeeded" | "failed";
+                    startedAt: number; finishedAt?: number; promptId?: string;
+                    outputs?: RunOutput[]; error?: string; attempts?: number; interrupted?: boolean };
+RunOutput       = { nodeId: string; filename: string; subfolder: string; type: string;
+                    kind: "image" | "video" | "audio" | "file"; url: string };
+
+UiEvent         = { id: number; at: number;
+                    kind: "job-failed" | "upstream-down" | "upstream-up" | "comfy-crashed"
+                        | "comfy-gave-up" | "outputs-trimmed";
+                    params: Record<string, string> };
+```
+
+`RunOutput.url` points at ComfyUI's `/view`; fetch the same file through
+`/api/output` when ComfyUI is not reachable from where you are.
+
+### What it talks to on ComfyUI
+
+For completeness, the ComfyUI endpoints the server uses, all on `COMFY_URL`:
+`/system_stats` and `/queue` for status, `/upload/image`, `/prompt`,
+`/history/:promptId`, `/view`, `/interrupt`, `/object_info`, and the
+`/ws?clientId=` socket for progress.
 
 ## Who can reach the UI
 
@@ -338,7 +618,7 @@ Three checks, in `src/ui/guard.ts`, cover `/api/*`:
 | Check | What it stops |
 | ----- | ------------- |
 | **Host** — only IP literals and `localhost` are answered | a rebound domain name reaching the API |
-| **Origin / `Sec-Fetch-Site`** — a cross-site write is refused | a web page you visited driving this UI |
+| **Origin / `Sec-Fetch-Site`** — a cross-site request is refused, reads included | a web page you visited driving this UI, or probing it |
 | **`UI_TOKEN`** — off unless set | anyone else on the network |
 
 Requests with no `Origin` at all — `curl`, a script — are allowed through, since
@@ -351,8 +631,17 @@ The app always sets a fresh `UI_TOKEN` at launch and hands it to its own window
 once, so nothing else on the machine can drive it. Running from source, **set
 `UI_TOKEN` before changing `UI_HOSTNAME`**: generate one with
 `openssl rand -hex 24`, then open the UI once as `http://host:3939/?token=…`.
-The browser keeps it and clears it from the address bar. Starting with a
-non-loopback hostname and no token prints a warning at boot.
+The page trades it for an `HttpOnly` cookie straight away and clears it from
+the address bar, so nothing running in the page can read it afterwards.
+Starting with a non-loopback hostname and no token prints a warning at boot.
+
+The page also carries a Content Security Policy that allows scripts, styles,
+fonts and requests from this server only. The fonts are bundled, so the page
+loads nothing from anywhere else.
+
+Upstream secrets are stored in plain text in `.state.json` under `DATA_DIR`,
+the same way `.env` would hold them. The file is written readable by its owner
+only; treat it like `.env` all the same.
 
 ## Building it yourself
 
