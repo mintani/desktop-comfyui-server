@@ -234,7 +234,12 @@ export function applyParams(loaded: LoadedWorkflow, params: RunParams): ApiWorkf
     if (node) node.inputs[slot.input] = value;
   };
 
-  if (params.imageFilename !== undefined) set(slots.image, params.imageFilename);
+  // Images go into the loaders in order. One the workflow has no loader for is
+  // dropped, like any other parameter without a slot.
+  for (const [index, slot] of slots.images.entries()) {
+    const filename = params.imageFilenames?.[index];
+    if (filename !== undefined) set(slot, filename);
+  }
   if (params.positivePrompt !== undefined) set(slots.positive, params.positivePrompt);
   if (params.negativePrompt !== undefined) set(slots.negative, params.negativePrompt);
   if (params.fps !== undefined) set(slots.frameRate, params.fps);
@@ -296,6 +301,17 @@ export async function runWorkflow(
   onQueued?: (promptId: string) => void,
 ): Promise<RunResult> {
   const loaded = await loadWorkflow(name);
+
+  // Said here rather than failed on: a workflow without a loader has always
+  // ignored the image, and a job server that sends two to a one-loader
+  // workflow still gets a run — one that used the first, which the log says.
+  const sent = params.imageFilenames?.length ?? 0;
+  if (sent > loaded.slots.images.length) {
+    console.warn(
+      `[worker] ${name}: ${sent} input image(s) sent, ${loaded.slots.images.length} image` +
+        " loader(s) found — the rest are ignored",
+    );
+  }
   return runPrompt(applyParams(loaded, params), onQueued);
 }
 
@@ -305,21 +321,28 @@ export async function runWorkflow(
  * JSON itself; this walks every node's inputs and swaps values, never touching
  * the graph's structure.
  *
- * - "__INPUT_IMAGE__"   → the uploaded input image's filename
+ * - "__INPUT_IMAGE__"   → the first input image's filename, as uploaded;
+ *   "__INPUT_IMAGE_2__", "__INPUT_IMAGE_3__" … the ones after it
  * - "__TRIGGER_WORDS__" → the preset's trigger words (empty when null)
  * - "__SEED__"          → a random seed (number)
  */
+const INPUT_IMAGE_PLACEHOLDER = /^__INPUT_IMAGE(?:_(\d+))?__$/;
+
 function substitutePlaceholders(
   workflow: ApiWorkflow,
-  imageFilename: string | undefined,
+  imageFilenames: string[],
   triggerWords: string | null,
 ): void {
   const seed = Math.floor(Math.random() * 2 ** 32);
   const trigger = triggerWords ?? "";
   for (const node of Object.values(workflow)) {
     for (const [name, value] of Object.entries(node.inputs)) {
-      if (value === "__INPUT_IMAGE__") {
-        if (imageFilename) node.inputs[name] = imageFilename;
+      const image = typeof value === "string" ? INPUT_IMAGE_PLACEHOLDER.exec(value) : null;
+      if (image) {
+        // A placeholder with no image behind it stays as it is, so the run
+        // fails on a file that does not exist rather than running on the wrong one.
+        const filename = imageFilenames[image[1] ? Number(image[1]) - 1 : 0];
+        if (filename !== undefined) node.inputs[name] = filename;
       } else if (value === "__SEED__") {
         node.inputs[name] = seed;
       } else if (typeof value === "string" && value.includes("__TRIGGER_WORDS__")) {
@@ -336,7 +359,7 @@ function substitutePlaceholders(
  */
 export async function runServerWorkflow(
   spec: ServerWorkflow,
-  imageFilename: string | undefined,
+  imageFilenames: string[],
   onQueued?: (promptId: string) => void,
 ): Promise<RunResult> {
   let workflow: ApiWorkflow;
@@ -348,6 +371,6 @@ export async function runServerWorkflow(
       { cause: err },
     );
   }
-  substitutePlaceholders(workflow, imageFilename, spec.triggerWords);
+  substitutePlaceholders(workflow, imageFilenames, spec.triggerWords);
   return runPrompt(workflow, onQueued);
 }

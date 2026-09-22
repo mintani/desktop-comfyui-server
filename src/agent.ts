@@ -28,7 +28,7 @@ import { fetchManifest, getReadyModels, reportObjectInfo, syncModels } from "./m
 import { activeWorkflowName, runServerWorkflow, runWorkflow } from "./workflow";
 import type { UpstreamServer } from "./upstream";
 import type { RunResult } from "./workflow";
-import type { ClaimedJob } from "./types";
+import type { ClaimedJob, SourceImage } from "./types";
 
 type HeartbeatState = {
   ok: boolean;
@@ -79,6 +79,31 @@ function inputImageType(declared: string): { contentType: string; ext: string } 
   const contentType = declared.split(";")[0]?.trim().toLowerCase() ?? "";
   const ext = INPUT_IMAGE_TYPES[contentType];
   return ext ? { contentType, ext } : { contentType: "image/png", ext: "png" };
+}
+
+/**
+ * Push the claim's images into ComfyUI's input folder, in order. The names
+ * repeat across attempts and the upload overwrites, so a retry cannot litter
+ * the folder; ComfyUI has the last word on a name, so what it answers is what
+ * the workflow is given.
+ */
+async function uploadInputs(jobId: string, images: SourceImage[]): Promise<string[]> {
+  const filenames: string[] = [];
+  for (const [index, image] of images.entries()) {
+    const { contentType, ext } = inputImageType(image.contentType);
+    filenames.push(
+      await uploadImage(
+        COMFY_URL,
+        `input_${jobId}_${index + 1}.${ext}`,
+        contentType,
+        Buffer.from(image.base64, "base64"),
+      ),
+    );
+  }
+  if (filenames.length > 0) {
+    console.log(`[worker] uploaded input image(s) → ${filenames.join(", ")}`);
+  }
+  return filenames;
 }
 
 async function sendHeartbeats() {
@@ -169,23 +194,10 @@ async function processJob(server: UpstreamServer, claimed: ClaimedJob) {
     if (attempt > 1) noteAttempt(job, attempt);
 
     try {
-      let imageFilename: string | undefined;
-      if (claimed.sourceImageBase64) {
-        const { contentType, ext } = inputImageType(claimed.sourceImageContentType);
-        // The name repeats across attempts and the upload overwrites, so a
-        // retry cannot litter ComfyUI's input folder.
-        imageFilename = await uploadImage(
-          COMFY_URL,
-          `input_${claimed.jobId}.${ext}`,
-          contentType,
-          Buffer.from(claimed.sourceImageBase64, "base64"),
-        );
-        console.log(`[worker] uploaded input image → ${imageFilename}`);
-      }
-
+      const imageFilenames = await uploadInputs(claimed.jobId, claimed.sourceImages);
       const result = await runWorkflow(
         workflowName,
-        { ...claimed.params, imageFilename },
+        { ...claimed.params, imageFilenames },
         (promptId) => markQueued(job, promptId),
       );
       await deliver(server, claimed.jobId, result);
@@ -229,18 +241,8 @@ async function processServerWorkflowJob(
   });
 
   try {
-    let imageFilename: string | undefined;
-    if (claimed.sourceImageBase64) {
-      const { contentType, ext } = inputImageType(claimed.sourceImageContentType);
-      imageFilename = await uploadImage(
-        COMFY_URL,
-        `input_${claimed.jobId}.${ext}`,
-        contentType,
-        Buffer.from(claimed.sourceImageBase64, "base64"),
-      );
-    }
-
-    const result = await runServerWorkflow(spec, imageFilename, (promptId) =>
+    const imageFilenames = await uploadInputs(claimed.jobId, claimed.sourceImages);
+    const result = await runServerWorkflow(spec, imageFilenames, (promptId) =>
       markQueued(job, promptId),
     );
     await deliver(server, claimed.jobId, result);

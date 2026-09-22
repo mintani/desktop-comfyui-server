@@ -233,7 +233,7 @@ inputs without being told:
 
 | Parameter   | How it is found                                                       |
 | ----------- | --------------------------------------------------------------------- |
-| `image`     | the first `LoadImage`-style node                                      |
+| `images`    | every `LoadImage`-style node, in node-id order                        |
 | `positive`  | follow a sampler's `positive` link back to the node holding the text  |
 | `negative`  | same, via the `negative` link                                         |
 | `seed`      | every node with a `seed` / `noise_seed` input, all set together       |
@@ -241,8 +241,12 @@ inputs without being told:
 | `frameRate` | a node with a numeric `frame_rate` input                              |
 
 The Workflows page shows which of these were found, so a workflow that needs
-help is obvious before a job server sends work. A parameter whose slot was not
-found is simply ignored — a workflow with no `LoadImage` takes no input image.
+help is obvious before a job server sends work. Input images go into the
+loaders in the order listed, so a workflow that compares two pictures takes
+them as its loaders are numbered; the sidecar below fixes the order when that
+is wrong. A parameter whose slot was not found is simply ignored — a workflow
+with no `LoadImage` takes no input image, and images beyond the loaders a
+workflow has are dropped with a note in the log.
 
 *Check* on a workflow's row goes further: it asks the running ComfyUI — via
 `/object_info` — whether every node type in the file exists there, and whether
@@ -266,6 +270,7 @@ workflow, `<workflow>.slots.json`, beside it in the workflows folder:
 
 ```json
 {
+  "images": [{ "nodeId": "10", "input": "image" }, { "nodeId": "12", "input": "image" }],
   "positive": { "nodeId": "129:93", "input": "text" },
   "negative": { "nodeId": "129:89", "input": "text" },
   "seed": [{ "nodeId": "129:86", "input": "noise_seed" }]
@@ -274,7 +279,8 @@ workflow, `<workflow>.slots.json`, beside it in the workflows folder:
 
 Only the keys you list are overridden. Set one to `null` to switch that
 parameter off. An override naming a node that isn't in the workflow is an error,
-reported in the UI rather than silently ignored.
+reported in the UI rather than silently ignored. `image` — the older single
+form — still works and means a one-item `images`.
 
 ## Attaching a job server
 
@@ -367,8 +373,12 @@ answer's `pendingJobs`, if present, is shown in the UI.
 {
   "jobId": "…",
   "userId": "…",
-  "sourceImageBase64": "…",              // "" for no input image
-  "sourceImageContentType": "image/png",
+  "sourceImages": [                      // optional; in the order the workflow's loaders take them
+    { "base64": "…", "contentType": "image/png" },
+    { "base64": "…", "contentType": "image/jpeg" }
+  ],
+  "sourceImageBase64": "…",              // the one-image form; "" for no input image
+  "sourceImageContentType": "image/png", // both ignored when sourceImages is present
   "params": {                            // optional; every field optional
     "positivePrompt": "…",
     "negativePrompt": "…",
@@ -387,9 +397,18 @@ answer's `pendingJobs`, if present, is shown in the UI.
 - **an object** `{ "presetId", "workflowJson", "triggerWords" }` — the server
   ships the workflow itself. `workflowJson` is an API-format workflow as a
   string; before it is queued the host replaces the literal input values
-  `"__INPUT_IMAGE__"` (the uploaded image's filename), `"__SEED__"` (a random
-  seed) and every occurrence of `__TRIGGER_WORDS__` inside a string
-  (`triggerWords`, or empty when `null`). `params` is ignored for these.
+  `"__INPUT_IMAGE__"` (the first input image's filename as uploaded, with
+  `"__INPUT_IMAGE_2__"`, `"__INPUT_IMAGE_3__"` … for the ones after it),
+  `"__SEED__"` (a random seed) and every occurrence of `__TRIGGER_WORDS__`
+  inside a string (`triggerWords`, or empty when `null`). `params` is ignored
+  for these.
+
+Input images come as `sourceImages`, in the order the workflow's image loaders
+take them, or — for a single image — as the `sourceImageBase64` /
+`sourceImageContentType` pair, which reads as a one-image list; a server sends
+one or the other. Each is uploaded to ComfyUI's input folder and written into
+the matching loader. An image with no loader to go to is dropped, with a note
+in the host's log.
 
 `params` fields are written into the slots detected in a local workflow; a field
 whose slot the workflow lacks is dropped. `seconds` becomes a frame count using
@@ -601,7 +620,7 @@ The shapes it refers to:
 ```ts
 WorkflowSummary = { name: string; valid: boolean; error?: string; nodeCount?: number;
                     slots?: WorkflowSlots; overridden?: string[] };
-WorkflowSlots   = { image: Slot | null; positive: Slot | null; negative: Slot | null;
+WorkflowSlots   = { images: Slot[]; positive: Slot | null; negative: Slot | null;
                     seed: Slot[]; length: Slot | null; frameRate: Slot | null };
 Slot            = { nodeId: string; input: string; label: string };
 

@@ -15,7 +15,7 @@ type RunMode = "accepting" | "local" | "paused";
 type Slot = { nodeId: string; input: string; label: string };
 
 type WorkflowSlots = {
-  image: Slot | null;
+  images: Slot[];
   positive: Slot | null;
   negative: Slot | null;
   seed: Slot[];
@@ -459,17 +459,20 @@ function slotTags(summary: WorkflowSummary): string {
   const overridden = new Set(summary.overridden ?? []);
 
   const entries: [string, boolean][] = [
-    ["image", Boolean(slots.image)],
+    ["images", slots.images.length > 0],
     ["positive", Boolean(slots.positive)],
     ["negative", Boolean(slots.negative)],
     ["seed", slots.seed.length > 0],
     ["length", Boolean(slots.length)],
     ["frameRate", Boolean(slots.frameRate)],
   ];
+  // The slots that come in numbers, said with the number: how many pictures a
+  // job may send, how many seeds a run pins.
+  const counts: Record<string, number> = { images: slots.images.length, seed: slots.seed.length };
 
   const tags = entries.map(([key, present]) => {
     const cls = overridden.has(key) ? "tag over" : present ? "tag on" : "tag";
-    const suffix = key === "seed" && present ? ` ×${slots.seed.length}` : "";
+    const suffix = present && counts[key] ? ` ×${counts[key]}` : "";
     const title = overridden.has(key)
       ? t("slot.override")
       : present
