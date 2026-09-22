@@ -25,7 +25,8 @@ export type Slot = {
 };
 
 export type WorkflowSlots = {
-  image: Slot | null;
+  /** Every image loader, in node-id order; input images are written in that order. */
+  images: Slot[];
   positive: Slot | null;
   negative: Slot | null;
   /** All seed-ish inputs; they are set together so a run is reproducible. */
@@ -39,6 +40,8 @@ export type SlotRef = { nodeId: string; input: string };
 
 /** Sidecar overrides. A key set to `null` disables that parameter. */
 export type SlotOverrides = Partial<{
+  images: SlotRef[] | null;
+  /** The older single form: one image, the same as a one-item `images`. */
   image: SlotRef | null;
   positive: SlotRef | null;
   negative: SlotRef | null;
@@ -103,16 +106,21 @@ function makeSlot(workflow: ApiWorkflow, nodeId: string, input: string): Slot {
 
 const IMAGE_LOADER_CLASSES = new Set(["LoadImage", "LoadImageMask", "LoadImageOutput"]);
 
-function detectImage(workflow: ApiWorkflow): Slot | null {
+/**
+ * Every image loader, in node-id order — the order input images are written
+ * in, so a workflow that compares two pictures takes them as its two loaders
+ * are numbered. Custom packs wrap the loader under their own name, so a looser
+ * match is tried before giving up, but only one tier is taken: a `LoadImage`
+ * beside a custom loader means the custom one is there for something else.
+ */
+function detectImages(workflow: ApiWorkflow): Slot[] {
   const candidates = Object.entries(workflow).filter(
     ([, node]) => typeof node.inputs["image"] === "string",
   );
-  const exact = candidates.find(([, node]) => IMAGE_LOADER_CLASSES.has(node.class_type));
-  // Custom packs wrap the loader under their own name, so fall back to a
-  // looser match before giving up.
-  const loose = candidates.find(([, node]) => /load.*image/i.test(node.class_type));
-  const picked = exact ?? loose ?? candidates[0];
-  return picked ? makeSlot(workflow, picked[0], "image") : null;
+  const exact = candidates.filter(([, node]) => IMAGE_LOADER_CLASSES.has(node.class_type));
+  const loose = candidates.filter(([, node]) => /load.*image/i.test(node.class_type));
+  const picked = exact.length > 0 ? exact : loose.length > 0 ? loose : candidates.slice(0, 1);
+  return picked.map(([id]) => makeSlot(workflow, id, "image"));
 }
 
 const SEED_INPUTS = ["seed", "noise_seed"] as const;
@@ -181,7 +189,7 @@ function detectNumeric(workflow: ApiWorkflow, input: string): Slot | null {
 export function detectSlots(workflow: ApiWorkflow): WorkflowSlots {
   const { positive, negative } = detectPrompts(workflow);
   return {
-    image: detectImage(workflow),
+    images: detectImages(workflow),
     positive,
     negative,
     seed: detectSeeds(workflow),
@@ -217,23 +225,34 @@ export function applyOverrides(
   const slots: WorkflowSlots = { ...detected };
   const overridden: string[] = [];
 
-  for (const key of ["image", "positive", "negative", "length", "frameRate"] as const) {
+  for (const key of ["positive", "negative", "length", "frameRate"] as const) {
     const ref = overrides[key];
     if (ref === undefined) continue;
     slots[key] = ref === null ? null : resolveRef(workflow, ref, key);
     overridden.push(key);
   }
 
-  const seedRefs = overrides.seed;
-  if (seedRefs !== undefined) {
-    if (seedRefs !== null && !Array.isArray(seedRefs)) {
-      throw new Error('override "seed" must be an array of { nodeId, input }');
+  const lists = [
+    ["images", imageOverride(overrides)],
+    ["seed", overrides.seed],
+  ] as const;
+  for (const [key, refs] of lists) {
+    if (refs === undefined) continue;
+    if (refs !== null && !Array.isArray(refs)) {
+      throw new Error(`override "${key}" must be an array of { nodeId, input }`);
     }
-    slots.seed = seedRefs === null ? [] : seedRefs.map((ref) => resolveRef(workflow, ref, "seed"));
-    overridden.push("seed");
+    slots[key] = refs === null ? [] : refs.map((ref) => resolveRef(workflow, ref, key));
+    overridden.push(key);
   }
 
   return { slots, overridden };
+}
+
+/** `image`, the older single form, reads as a one-item `images`. */
+function imageOverride(overrides: SlotOverrides): SlotRef[] | null | undefined {
+  if (overrides.images !== undefined) return overrides.images;
+  if (overrides.image === undefined) return undefined;
+  return overrides.image === null ? null : [overrides.image];
 }
 
 /** Current literal value at a slot, when it is a plain number rather than a link. */

@@ -51,8 +51,11 @@ export type RunData = {
  * was not detected in that workflow is silently ignored.
  */
 export type RunParams = {
-  /** Filename as returned by ComfyUI's `/upload/image`, not a local path. */
-  imageFilename?: string;
+  /**
+   * Input images as ComfyUI's `/upload/image` named them, not local paths, in
+   * the order the workflow's image loaders take them.
+   */
+  imageFilenames?: string[];
   positivePrompt?: string;
   negativePrompt?: string;
   /** Applied to every detected seed input. Randomised when omitted. */
@@ -92,8 +95,8 @@ export type JobRecord = {
 
 /**
  * A workflow shipped inside the claim itself by the upstream server. The JSON is
- * API format; placeholders (`__INPUT_IMAGE__`, `__TRIGGER_WORDS__`, `__SEED__`)
- * are substituted here before queueing.
+ * API format; placeholders (`__INPUT_IMAGE__` and `__INPUT_IMAGE_2__` …,
+ * `__TRIGGER_WORDS__`, `__SEED__`) are substituted here before queueing.
  */
 export type ServerWorkflow = {
   presetId: string;
@@ -101,12 +104,18 @@ export type ServerWorkflow = {
   triggerWords: string | null;
 };
 
+/** One input image as a claim carries it. */
+export type SourceImage = {
+  base64: string;
+  contentType: string;
+};
+
 /** Job payload handed out by an upstream server's claim endpoint. */
 export type ClaimedJob = {
   jobId: string;
   userId: string;
-  sourceImageBase64: string;
-  sourceImageContentType: string;
+  /** In the order the workflow's image loaders take them; empty for none. */
+  sourceImages: SourceImage[];
   /** Optional per-job overrides; upstreams that don't send these get defaults. */
   params?: RunParams;
   /**

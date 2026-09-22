@@ -26,7 +26,14 @@
  */
 
 import type { Settings, UpstreamConfig } from "./settings";
-import type { ClaimedJob, ComfyStatusResult, RunData, RunParams, ServerWorkflow } from "./types";
+import type {
+  ClaimedJob,
+  ComfyStatusResult,
+  RunData,
+  RunParams,
+  ServerWorkflow,
+  SourceImage,
+} from "./types";
 
 export type UpstreamServer = {
   /** Log label; defaults to the URL host when `*_NAME` is unset. */
@@ -139,10 +146,10 @@ function toServer(config: UpstreamConfig): UpstreamServer {
 // Reading what a server sends back
 // ---------------------------------------------------------------------------
 
-/** Enough for any answer in this protocol except a claim, which carries an image. */
+/** Enough for any answer in this protocol except a claim, which carries images. */
 const SMALL_BODY_LIMIT = 64 * 1024;
-/** A claim holds the input image as base64; this allows for a large one. */
-const CLAIM_BODY_LIMIT = 48 * 1024 * 1024;
+/** A claim holds its input images as base64; this allows for a couple of large ones. */
+const CLAIM_BODY_LIMIT = 64 * 1024 * 1024;
 
 /**
  * Parse a JSON body no larger than `limit` bytes. `res.json()` on its own would
@@ -368,6 +375,34 @@ function toServerWorkflow(value: Record<string, unknown>): ServerWorkflow {
 }
 
 /**
+ * The input images: `sourceImages` when the server sends it, otherwise the
+ * older single pair, which older servers still send and any server may keep
+ * sending for a one-image job. The pair with an empty string is no image.
+ */
+function toSourceImages(body: Record<string, unknown>): SourceImage[] {
+  const list = body.sourceImages;
+  if (list !== undefined && list !== null) {
+    if (!Array.isArray(list)) throw new Error("sourceImages is not an array");
+    return list.map((entry, index): SourceImage => {
+      if (!isRecord(entry)) throw new Error(`sourceImages[${index}] is not an object`);
+      const base64 = optionalString(entry.base64);
+      if (!base64) throw new Error(`sourceImages[${index}] has no base64 image`);
+      const contentType = entry.contentType ?? "image/png";
+      if (typeof contentType !== "string") {
+        throw new Error(`sourceImages[${index}].contentType is not a string`);
+      }
+      return { base64, contentType };
+    });
+  }
+
+  const image = body.sourceImageBase64 ?? "";
+  if (typeof image !== "string") throw new Error("sourceImageBase64 is not a string");
+  const contentType = body.sourceImageContentType ?? "image/png";
+  if (typeof contentType !== "string") throw new Error("sourceImageContentType is not a string");
+  return image ? [{ base64: image, contentType }] : [];
+}
+
+/**
  * Narrow a claim to the shape this side runs. Throws on anything that is not a
  * job, so a server that sends nonsense is logged rather than obeyed.
  */
@@ -377,10 +412,7 @@ export function toClaimedJob(body: unknown): ClaimedJob {
   const jobId = optionalString(body.jobId);
   if (!jobId || !SAFE_ID.test(jobId)) throw new Error("claim has no usable jobId");
 
-  const image = body.sourceImageBase64 ?? "";
-  if (typeof image !== "string") throw new Error("sourceImageBase64 is not a string");
-  const contentType = body.sourceImageContentType ?? "image/png";
-  if (typeof contentType !== "string") throw new Error("sourceImageContentType is not a string");
+  const sourceImages = toSourceImages(body);
 
   let workflow: ClaimedJob["workflow"];
   if (body.workflow === undefined || body.workflow === null) workflow = null;
@@ -391,8 +423,7 @@ export function toClaimedJob(body: unknown): ClaimedJob {
   return {
     jobId,
     userId: optionalString(body.userId) ?? "",
-    sourceImageBase64: image,
-    sourceImageContentType: contentType,
+    sourceImages,
     params: toParams(body.params),
     workflow,
   };
