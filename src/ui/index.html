@@ -3,6 +3,20 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      Everything the page loads or talks to is this server. Scripts are the
+      bundled module plus the theme script below, allowed by its hash: if you
+      edit that script, recompute the hash with
+        bun -e 'const s = await Bun.file("src/ui/index.html").text(); const m = /<script>([\s\S]*?)<\/script>/.exec(s); console.log(new Bun.CryptoHasher("sha256").update(m[1]).digest("base64"))'
+      Inline styles stay allowed: the progress bar sets its width that way, and
+      a style attribute cannot run code. Fonts are allowed as data: because the
+      bundler inlines them into the stylesheet. Sent as a meta tag because the
+      HTML route is Bun's bundle and takes no headers.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'sha256-ZJy3UuKHQs/zRWSEcpG7Bu0tZBXLhIw6d0sCOCmg9I8='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'"
+    />
     <title>Desktop ComfyUI Server</title>
     <link
       rel="icon"
@@ -35,12 +49,6 @@
       })();
     </script>
 
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
-    />
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
