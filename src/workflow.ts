@@ -1,11 +1,11 @@
 import { readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { collectOutputs, queuePrompt, runFailure, waitForPrompt } from "./comfy";
+import { collectData, collectOutputs, queuePrompt, runFailure, waitForPrompt } from "./comfy";
 import { COMFY_URL, JOB_TIMEOUT_MS, WORKFLOW_DIR } from "./config";
 import { loadSettings, saveSettings } from "./settings";
 import { applyOverrides, detectSlots, parseApiWorkflow, readNumber } from "./slots";
 import type { ApiWorkflow, Slot, SlotOverrides, WorkflowSlots } from "./slots";
-import type { RunOutput, RunParams, ServerWorkflow } from "./types";
+import type { RunData, RunOutput, RunParams, ServerWorkflow } from "./types";
 
 export type LoadedWorkflow = {
   name: string;
@@ -252,17 +252,26 @@ export function applyParams(loaded: LoadedWorkflow, params: RunParams): ApiWorkf
   return workflow;
 }
 
+export type RunResult = {
+  /** Files the run produced. */
+  outputs: RunOutput[];
+  /** What its nodes reported besides files. */
+  data: RunData[];
+};
+
 /**
  * Queue a workflow and wait for it to finish. `onQueued` fires as soon as
  * ComfyUI accepts the prompt, so callers can record the id before the wait.
+ *
+ * A run has to leave something behind — a file, or a value from a preview or
+ * tagger node — or it fails here: a workflow with no save node would otherwise
+ * "succeed" with nothing to hand anyone.
  */
-export async function runWorkflow(
-  name: string,
-  params: RunParams,
+async function runPrompt(
+  workflow: ApiWorkflow,
   onQueued?: (promptId: string) => void,
-): Promise<RunOutput[]> {
-  const loaded = await loadWorkflow(name);
-  const promptId = await queuePrompt(COMFY_URL, applyParams(loaded, params));
+): Promise<RunResult> {
+  const promptId = await queuePrompt(COMFY_URL, workflow);
   onQueued?.(promptId);
 
   const entry = await waitForPrompt(COMFY_URL, promptId, JOB_TIMEOUT_MS);
@@ -271,10 +280,23 @@ export async function runWorkflow(
   if (failure) throw new Error(failure);
 
   const outputs = collectOutputs(COMFY_URL, entry);
-  if (outputs.length === 0) {
-    throw new Error("run finished but produced no files — does the workflow have a save node?");
+  const data = collectData(entry, workflow);
+  if (outputs.length === 0 && data.length === 0) {
+    throw new Error(
+      "run finished but produced nothing — does the workflow have a save or preview node?",
+    );
   }
-  return outputs;
+  return { outputs, data };
+}
+
+/** Run a local workflow with the caller's parameters written into its slots. */
+export async function runWorkflow(
+  name: string,
+  params: RunParams,
+  onQueued?: (promptId: string) => void,
+): Promise<RunResult> {
+  const loaded = await loadWorkflow(name);
+  return runPrompt(applyParams(loaded, params), onQueued);
 }
 
 /**
@@ -316,7 +338,7 @@ export async function runServerWorkflow(
   spec: ServerWorkflow,
   imageFilename: string | undefined,
   onQueued?: (promptId: string) => void,
-): Promise<RunOutput[]> {
+): Promise<RunResult> {
   let workflow: ApiWorkflow;
   try {
     workflow = parseApiWorkflow(JSON.parse(spec.workflowJson));
@@ -327,18 +349,5 @@ export async function runServerWorkflow(
     );
   }
   substitutePlaceholders(workflow, imageFilename, spec.triggerWords);
-
-  const promptId = await queuePrompt(COMFY_URL, workflow);
-  onQueued?.(promptId);
-
-  const entry = await waitForPrompt(COMFY_URL, promptId, JOB_TIMEOUT_MS);
-
-  const failure = runFailure(entry);
-  if (failure) throw new Error(failure);
-
-  const outputs = collectOutputs(COMFY_URL, entry);
-  if (outputs.length === 0) {
-    throw new Error("run finished but produced no files — does the workflow have a save node?");
-  }
-  return outputs;
+  return runPrompt(workflow, onQueued);
 }

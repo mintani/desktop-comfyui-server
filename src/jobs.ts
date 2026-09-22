@@ -10,7 +10,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { JOBS_FILE } from "./config";
 import { pushEvent } from "./events";
-import type { JobRecord, JobSource, RunOutput } from "./types";
+import type { JobRecord, JobSource, RunData, RunOutput } from "./types";
 
 const MAX_JOBS = 200;
 const WRITE_DELAY_MS = 500;
@@ -78,9 +78,10 @@ export function noteAttempt(job: JobRecord, attempt: number): void {
   persist();
 }
 
-export function completeJob(job: JobRecord, outputs: RunOutput[]): void {
+export function completeJob(job: JobRecord, outputs: RunOutput[], data: RunData[]): void {
   job.state = "succeeded";
   job.outputs = outputs;
+  if (data.length > 0) job.data = data;
   job.finishedAt = Date.now();
   persist();
 }

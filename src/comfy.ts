@@ -1,6 +1,6 @@
 import { CLIENT_ID } from "./progress";
 import type { ApiWorkflow } from "./slots";
-import type { ComfyStatusResult, GpuStatus, OutputKind, RunOutput } from "./types";
+import type { ComfyStatusResult, GpuStatus, OutputKind, RunData, RunOutput } from "./types";
 
 type ComfyQueueResponse = {
   queue_running?: unknown[];
@@ -219,6 +219,33 @@ export function collectOutputs(baseUrl: string, entry: HistoryEntry): RunOutput[
     }
   }
   return outputs;
+}
+
+/** A bucket of files, as `images`, `gifs` and the like are — or nothing at all. */
+function isFileList(value: unknown): boolean {
+  return Array.isArray(value) && value.every(isOutputFile);
+}
+
+/**
+ * Everything a node reported that is not a file. A *Preview as Text* node puts
+ * its `text` here and a tagger its `tags`, which is how a workflow that scores
+ * two images rather than drawing one hands its verdict back. Each key holds a
+ * list, because ComfyUI merges a node's `ui` output across a batch, and the
+ * values go on untouched: what "0.87" means is the workflow's business.
+ */
+export function collectData(entry: HistoryEntry, workflow: ApiWorkflow): RunData[] {
+  const data: RunData[] = [];
+  for (const [nodeId, nodeOutput] of Object.entries(entry.outputs ?? {})) {
+    const values: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(nodeOutput)) {
+      if (!isFileList(value)) values[key] = value;
+    }
+    if (Object.keys(values).length === 0) continue;
+
+    const node = workflow[nodeId];
+    data.push({ nodeId, label: node?._meta?.title ?? node?.class_type ?? nodeId, values });
+  }
+  return data;
 }
 
 export function runFailure(entry: HistoryEntry): string | null {

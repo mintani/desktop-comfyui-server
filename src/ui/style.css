@@ -988,6 +988,30 @@ button.ghost.danger:hover:not(:disabled) {
   background: var(--canvas);
 }
 
+/* What a run reported besides files — a score, a tag list — one row per node. */
+.data {
+  display: grid;
+  grid-template-columns: fit-content(12rem) minmax(0, 1fr);
+  gap: var(--space-3xs) var(--space-2xs);
+  margin: var(--space-2xs) 0 0;
+  font-size: var(--text-xs);
+}
+
+.data dt {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.data dd {
+  margin: 0;
+  color: var(--muted-foreground);
+}
+
+.data code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* Narrowing the run history, and switching how it is drawn. */
 .filters {
   display: flex;

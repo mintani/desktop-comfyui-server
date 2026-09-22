@@ -27,6 +27,7 @@ import {
 import { fetchManifest, getReadyModels, reportObjectInfo, syncModels } from "./models";
 import { activeWorkflowName, runServerWorkflow, runWorkflow } from "./workflow";
 import type { UpstreamServer } from "./upstream";
+import type { RunResult } from "./workflow";
 import type { ClaimedJob } from "./types";
 
 type HeartbeatState = {
@@ -123,6 +124,19 @@ async function claimNext(): Promise<{ server: UpstreamServer; job: ClaimedJob } 
   return null;
 }
 
+/**
+ * Hand a finished run to the server it was claimed from. Upstreams take a
+ * single artefact: video workflows also emit preview images, so a playable
+ * file wins over whatever happens to come first. A run that reported values
+ * and no file — a scoring workflow — has nothing to upload and goes straight
+ * to `complete`, which carries the values either way.
+ */
+async function deliver(server: UpstreamServer, jobId: string, result: RunResult): Promise<void> {
+  const primary = result.outputs.find((output) => output.kind === "video") ?? result.outputs[0];
+  if (primary) await uploadResult(server, jobId, primary.url);
+  await reportComplete(server, jobId, result.data);
+}
+
 async function processJob(server: UpstreamServer, claimed: ClaimedJob) {
   // A workflow object rides inside the claim: run that,
   // not a local file. Strings and absence keep the existing local-file path.
@@ -169,19 +183,14 @@ async function processJob(server: UpstreamServer, claimed: ClaimedJob) {
         console.log(`[worker] uploaded input image → ${imageFilename}`);
       }
 
-      const outputs = await runWorkflow(
+      const result = await runWorkflow(
         workflowName,
         { ...claimed.params, imageFilename },
         (promptId) => markQueued(job, promptId),
       );
+      await deliver(server, claimed.jobId, result);
 
-      // Upstreams expect a single artefact. Video workflows also emit preview
-      // images, so prefer a playable file over whatever happens to come first.
-      const primary = outputs.find((output) => output.kind === "video") ?? outputs[0]!;
-      await uploadResult(server, claimed.jobId, primary.url);
-      await reportComplete(server, claimed.jobId);
-
-      completeJob(job, outputs);
+      completeJob(job, result.outputs, result.data);
       console.log(`[worker] job ${claimed.jobId} completed`);
       return;
     } catch (err) {
@@ -231,15 +240,12 @@ async function processServerWorkflowJob(
       );
     }
 
-    const outputs = await runServerWorkflow(spec, imageFilename, (promptId) =>
+    const result = await runServerWorkflow(spec, imageFilename, (promptId) =>
       markQueued(job, promptId),
     );
+    await deliver(server, claimed.jobId, result);
 
-    const primary = outputs.find((output) => output.kind === "video") ?? outputs[0]!;
-    await uploadResult(server, claimed.jobId, primary.url);
-    await reportComplete(server, claimed.jobId);
-
-    completeJob(job, outputs);
+    completeJob(job, result.outputs, result.data);
     console.log(`[worker] job ${claimed.jobId} completed`);
   } catch (err) {
     const reason = message(err);

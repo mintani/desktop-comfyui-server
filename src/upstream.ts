@@ -12,7 +12,7 @@
  * - `POST /heartbeat`                 — report ComfyUI status, may return `{ pendingJobs }`
  * - `POST /jobs/claim`                — take the next job, or 204 when idle
  * - `POST /jobs/:jobId/result`        — upload the produced file as the raw body
- * - `POST /jobs/:jobId/complete`      — mark done
+ * - `POST /jobs/:jobId/complete`      — mark done, with `{ data }`: what the run reported besides files
  * - `POST /jobs/:jobId/fail`          — mark failed with `{ reason }`
  *
  * Linking adds one more, outside the per-host block and unauthenticated
@@ -26,7 +26,7 @@
  */
 
 import type { Settings, UpstreamConfig } from "./settings";
-import type { ClaimedJob, ComfyStatusResult, RunParams, ServerWorkflow } from "./types";
+import type { ClaimedJob, ComfyStatusResult, RunData, RunParams, ServerWorkflow } from "./types";
 
 export type UpstreamServer = {
   /** Log label; defaults to the URL host when `*_NAME` is unset. */
@@ -458,14 +458,28 @@ export async function uploadResult(
 }
 
 /**
+ * Mark the job done, handing over what its nodes reported besides files — a
+ * score, a tag list — as `{ data }`. Sent whether or not a file went before it,
+ * so a server that only stores pictures can ignore the body and a server that
+ * asked for a verdict finds it here.
+ *
  * Swallowing a failure here would strand the job: the upstream keeps it in the
  * assigned state, and claim only hands out pending ones, so it is never retried.
  * Throw and let the caller report it as a failure instead.
  */
-export async function reportComplete(server: UpstreamServer, jobId: string): Promise<void> {
+export async function reportComplete(
+  server: UpstreamServer,
+  jobId: string,
+  data: RunData[],
+): Promise<void> {
   const res = await fetch(
     `${server.url}/api/internal/hosts/${encodePath(server.hostId, "jobs", jobId, "complete")}`,
-    { method: "POST", headers: authHeaders(server), signal: AbortSignal.timeout(10_000) },
+    {
+      method: "POST",
+      headers: authHeaders(server),
+      body: JSON.stringify({ data }),
+      signal: AbortSignal.timeout(10_000),
+    },
   );
   if (!res.ok) throw new Error(`complete rejected: HTTP ${res.status}`);
 }

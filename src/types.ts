@@ -32,6 +32,20 @@ export type RunOutput = {
 };
 
 /**
+ * What a node reported for the run besides files: a *Preview as Text* node's
+ * `text`, a tagger's `tags`, a scorer's number. Kept exactly as ComfyUI
+ * recorded it — the workflow's author knows what each node means, and the
+ * node's title is how they tell one from another.
+ */
+export type RunData = {
+  nodeId: string;
+  /** The node's title in the workflow, or its class when it has none. */
+  label: string;
+  /** Every key the node reported that is not a list of files. */
+  values: Record<string, unknown>;
+};
+
+/**
  * Parameters a caller may override on a run. Every field is optional: a field
  * left out keeps whatever the workflow file already had, and a field whose slot
  * was not detected in that workflow is silently ignored.
@@ -64,6 +78,8 @@ export type JobRecord = {
   finishedAt?: number;
   promptId?: string;
   outputs?: RunOutput[];
+  /** Values the run reported besides files; absent when there were none. */
+  data?: RunData[];
   error?: string;
   /** Tries this job has had on this machine; absent means the first. */
   attempts?: number;
