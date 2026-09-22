@@ -50,7 +50,10 @@ and the interesting inputs are detected from the graph itself:
 | `frameRate`  | a node with a numeric `frame_rate` input                                    |
 
 Outputs are not detected in advance — whatever ComfyUI reports in its history
-for the run is collected, so images, videos and gifs all work.
+for the run is collected, so images, videos and gifs all work. A node that
+reports a value rather than a file — ComfyUI's *Preview as Text*, a tagger — is
+collected the same way and handed to the job server as JSON, named by the title
+the node has in ComfyUI.
 
 ## Overriding the detection
 

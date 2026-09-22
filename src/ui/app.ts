@@ -40,6 +40,13 @@ type RunOutput = {
   kind: "image" | "video" | "audio" | "file";
 };
 
+/** A value a node reported besides files, as ComfyUI recorded it. */
+type RunData = {
+  nodeId: string;
+  label: string;
+  values: Record<string, unknown>;
+};
+
 type JobRecord = {
   id: string;
   origin?: string;
@@ -49,6 +56,7 @@ type JobRecord = {
   finishedAt?: number;
   promptId?: string;
   outputs?: RunOutput[];
+  data?: RunData[];
   error?: string;
   /** Tries this job has had on this machine; absent means the first. */
   attempts?: number;
@@ -733,6 +741,21 @@ function renderOutputs(outputs: RunOutput[]): string {
   return `<div class="outputs">${media}</div>`;
 }
 
+/**
+ * What the run reported besides files, one row per node: its title, then the
+ * values as the JSON a job server receives them in, so what a server will see
+ * can be read off here without one.
+ */
+function renderData(data: RunData[]): string {
+  const rows = data
+    .map(
+      (entry) =>
+        `<dt>${esc(entry.label)}</dt><dd><code>${esc(JSON.stringify(entry.values))}</code></dd>`,
+    )
+    .join("");
+  return `<dl class="data">${rows}</dl>`;
+}
+
 function jobStateLabel(state: JobRecord["state"]): string {
   if (state === "running") return t("jobs.running");
   if (state === "succeeded") return t("jobs.succeeded");
@@ -795,6 +818,7 @@ function jobEntry(job: JobRecord, withDelete: boolean, progress: State["progress
     ${progressBar(job, progress)}
     ${jobError(job)}
     ${job.outputs?.length ? renderOutputs(job.outputs) : ""}
+    ${job.data?.length ? renderData(job.data) : ""}
   </div>`;
 }
 

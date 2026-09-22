@@ -253,6 +253,14 @@ time, the input image above all, are left out of the check.
 Outputs are not detected in advance. Whatever ComfyUI records in its history for
 the run is collected, so images, videos and gifs all work with no configuration.
 
+Values are collected the same way. A node that reports something other than a
+file — ComfyUI's own *Preview as Text*, a tagger's tag list, a similarity score
+— lands in the same history, and the app hands it to the job server as JSON.
+That is how a workflow that compares two images and answers with numbers
+returns its verdict; see [Result, complete, fail](#result-complete-fail). Give
+such a node a title in ComfyUI (double-click its header): the title is how the
+server tells one value from another.
+
 When detection gets it wrong, put the mapping in a sidecar named after the
 workflow, `<workflow>.slots.json`, beside it in the workflows folder:
 
@@ -321,8 +329,8 @@ has a reason, `{ "error": "…" }` is the shape the app knows how to show.
 | POST   | `/api/internal/hosts/link` | `{ code }`                         | `{ hostId, hostSecret, hostName? }`    | 15 s    | once, from *Link*             |
 | POST   | `/heartbeat`               | `HostStatus` (below)               | `{ pendingJobs? }`                     | 10 s    | every 30 s, and from *Test*   |
 | POST   | `/jobs/claim`              | —                                  | `ClaimedJob` (below), or `204` if idle | 10 s    | every 5 s while accepting     |
-| POST   | `/jobs/:jobId/result`      | the produced file, raw             | any 2xx                                | 120 s   | after a run succeeds          |
-| POST   | `/jobs/:jobId/complete`    | —                                  | any 2xx                                | 10 s    | after `result` is accepted    |
+| POST   | `/jobs/:jobId/result`      | the produced file, raw             | any 2xx                                | 120 s   | after a run that made a file  |
+| POST   | `/jobs/:jobId/complete`    | `{ data }` (below)                 | any 2xx                                | 10 s    | after `result`, or at once    |
 | POST   | `/jobs/:jobId/fail`        | `{ reason }`                       | any 2xx                                | 10 s    | when a run gives up           |
 | GET    | `/manifest`                | —                                  | `Manifest` (below), or `404`           | 15 s    | at start, then every 10 min   |
 | PUT    | `/object-info`             | ComfyUI's `/object_info` JSON      | any 2xx, or `404`                      | 60 s    | with the manifest sync        |
@@ -396,9 +404,32 @@ the server hears anything). A single run is abandoned after 10 minutes.
 
 When a run succeeds the host picks one file — a video if the run produced one,
 otherwise the first output — and `POST`s its bytes to `/jobs/:jobId/result` with
-the `Content-Type` ComfyUI served it with. Then it calls `/complete`. If either
-call is refused, the job is reported to `/fail` instead, so a server never sees a
-job stay assigned forever.
+the `Content-Type` ComfyUI served it with. Then it calls `/complete` with
+
+```jsonc
+{
+  "data": [
+    { "nodeId": "12", "label": "ccip", "values": { "text": ["0.87"] } },
+    { "nodeId": "15", "label": "WD14 Tagger", "values": { "tags": ["1girl, solo, smile"] } }
+  ]
+}
+```
+
+`data` is everything the run's nodes reported besides files, as ComfyUI wrote it
+into the history: one entry per node, `label` the node's title in the workflow
+(its class when it has none), `values` each key the node reported — a *Preview
+as Text* node's `text`, a tagger's `tags` — with its list of values. Nothing is
+parsed or converted on the way: a score previewed as text arrives as the string
+`"0.87"`, and what it means is between the workflow and the server. `data` is
+`[]` when the run reported nothing but files, so a server that only stores
+pictures can ignore the body.
+
+A run that reported values and no file at all — a workflow that scores two
+images rather than drawing one — skips `/result` and goes straight to
+`/complete`. A run that produced neither fails.
+
+If `result` or `complete` is refused, the job is reported to `/fail` instead, so
+a server never sees a job stay assigned forever.
 
 `/fail` carries `{ "reason": "<message>" }`, the same text the Runs page shows.
 
@@ -586,9 +617,11 @@ AcceptState     = { accepting: boolean; blockedBy: "mode" | "paused" | "schedule
 JobRecord       = { id: string; source: "ui" | "upstream"; origin?: string; workflow: string;
                     state: "running" | "succeeded" | "failed";
                     startedAt: number; finishedAt?: number; promptId?: string;
-                    outputs?: RunOutput[]; error?: string; attempts?: number; interrupted?: boolean };
+                    outputs?: RunOutput[]; data?: RunData[]; error?: string;
+                    attempts?: number; interrupted?: boolean };
 RunOutput       = { nodeId: string; filename: string; subfolder: string; type: string;
                     kind: "image" | "video" | "audio" | "file"; url: string };
+RunData         = { nodeId: string; label: string; values: Record<string, unknown> };
 
 UiEvent         = { id: number; at: number;
                     kind: "job-failed" | "upstream-down" | "upstream-up" | "comfy-crashed"
@@ -597,7 +630,9 @@ UiEvent         = { id: number; at: number;
 ```
 
 `RunOutput.url` points at ComfyUI's `/view`; fetch the same file through
-`/api/output` when ComfyUI is not reachable from where you are.
+`/api/output` when ComfyUI is not reachable from where you are. `RunData` is
+what the run reported besides files, exactly as it went to the job server — see
+[Result, complete, fail](#result-complete-fail).
 
 ### What it talks to on ComfyUI
 
