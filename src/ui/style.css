@@ -6,8 +6,59 @@
  * the default; the header switches it.
  *
  * Poppins carries display and UI. JetBrains Mono carries the values the machine
- * wrote — counts, ids, durations, file names.
+ * wrote — counts, ids, durations, file names. Both are served from here rather
+ * than fetched from Google: the page then talks to nothing but this server,
+ * which is what the README promises and what a tight CSP needs.
  */
+
+/* --------------------------------------------------------------------------
+   Fonts — the latin subsets, as Google Fonts cuts them (see fonts/README.md)
+   -------------------------------------------------------------------------- */
+
+@font-face {
+  font-family: "Poppins";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(./fonts/poppins-400.woff2) format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Poppins";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(./fonts/poppins-500.woff2) format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Poppins";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url(./fonts/poppins-600.woff2) format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* One variable file covers both weights the UI uses. */
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url(./fonts/jetbrains-mono.woff2) format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
 
 /* --------------------------------------------------------------------------
    Tokens — light (the portfolio's aqua)
@@ -73,10 +124,6 @@
   /* Click targets. Comfortable in a window a few hundred pixels wide. */
   --control: 2.25rem;
   --control-sm: 1.875rem;
-
-  /* Generated content, so it cannot come from the DOM. The value here is what
-     shows until the i18n module replaces it with the chosen language. */
-  --label-unused: " · unused";
 
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
@@ -581,28 +628,6 @@ button.ghost.square svg {
   display: none;
 }
 
-/* --------------------------------------------------------------------------
-   Workbench — controls on one side, what the machine is doing on the other
-   -------------------------------------------------------------------------- */
-
-.page.workbench {
-  max-width: 76rem;
-}
-
-@media (min-width: 62rem) {
-  .page.workbench {
-    grid-template-columns: minmax(0, 21rem) minmax(0, 1fr);
-    align-items: start;
-  }
-}
-
-.column {
-  display: grid;
-  gap: var(--space-xs);
-  align-content: start;
-  min-width: 0;
-}
-
 .panel {
   min-width: 0;
   padding: var(--space-sm);
@@ -635,15 +660,6 @@ button.ghost.square svg {
   font-size: var(--text-2xs);
   font-weight: 500;
   color: var(--muted-foreground);
-}
-
-.field.disabled {
-  opacity: 0.5;
-}
-
-.field.disabled > span::after {
-  content: var(--label-unused);
-  font-weight: 400;
 }
 
 input,
@@ -970,6 +986,30 @@ button.ghost.danger:hover:not(:disabled) {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--canvas);
+}
+
+/* What a run reported besides files — a score, a tag list — one row per node. */
+.data {
+  display: grid;
+  grid-template-columns: fit-content(12rem) minmax(0, 1fr);
+  gap: var(--space-3xs) var(--space-2xs);
+  margin: var(--space-2xs) 0 0;
+  font-size: var(--text-xs);
+}
+
+.data dt {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.data dd {
+  margin: 0;
+  color: var(--muted-foreground);
+}
+
+.data code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* Narrowing the run history, and switching how it is drawn. */

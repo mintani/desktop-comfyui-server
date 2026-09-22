@@ -13,8 +13,9 @@
 //!
 //! - `DATA_DIR` — a real directory to write to. The bundled server is a single
 //!   file, and the path inside it is read-only.
-//! - `UI_PORT` — chosen at launch, so the app never collides with a server the
-//!   user is already running.
+//! - `UI_PORT=0` — the server picks a free port itself and says which on its
+//!   first lines of output, so the app never collides with a server the user
+//!   is already running, and nothing else can slip onto the port in between.
 //! - `UI_TOKEN` — a fresh secret each launch, so nothing else on the machine
 //!   can drive a server that can start processes.
 //! - the window, which is the only thing holding that token.
@@ -25,10 +26,9 @@
 //! the tray shows without either one telling the other.
 
 use std::collections::HashMap;
-use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::sync::{mpsc, Mutex};
+use std::time::Duration;
 
 use tauri::menu::{CheckMenuItem, MenuBuilder, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -123,32 +123,20 @@ struct Shell {
     quitting: AtomicBool,
 }
 
-/// A port the OS has just told us is free. Something else could take it in the
-/// moment between here and the server binding it; that shows up as a server
-/// that fails to start, which is visible rather than silent.
-fn free_port() -> std::io::Result<u16> {
-    let listener = TcpListener::bind("127.0.0.1:0")?;
-    Ok(listener.local_addr()?.port())
+/// The line the server prints once it is listening. Asking the server rather
+/// than picking a port here and hoping it is still free closes a gap: a local
+/// process that grabbed the port first would otherwise have been handed the
+/// token in the window's first request.
+const PORT_LINE: &str = "[boot] Management UI on http://127.0.0.1:";
+
+fn reported_port(line: &str) -> Option<u16> {
+    line.trim().strip_prefix(PORT_LINE)?.trim().parse().ok()
 }
 
 /// Fresh every launch. It never has to outlive the window, so it is never
 /// stored anywhere.
 fn new_token() -> String {
     format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
-}
-
-/// Block until the server is listening. It starts in well under a second, so
-/// the wait is normally invisible; the timeout is for the case where it never
-/// starts at all and the log is the thing worth reading.
-fn wait_until_listening(port: u16, timeout: Duration) -> bool {
-    let deadline = Instant::now() + timeout;
-    while Instant::now() < deadline {
-        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
-            return true;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    false
 }
 
 fn show_window(app: &AppHandle) {
@@ -291,7 +279,6 @@ fn main() {
             None,
         ))
         .setup(|app| {
-            let port = free_port()?;
             let token = new_token();
 
             let data_dir = app.path().data_dir()?.join(DATA_FOLDER);
@@ -304,7 +291,7 @@ fn main() {
                 .sidecar("comfyui-server")?
                 .envs(HashMap::from([
                     ("UI_HOSTNAME".to_string(), "127.0.0.1".to_string()),
-                    ("UI_PORT".to_string(), port.to_string()),
+                    ("UI_PORT".to_string(), "0".to_string()),
                     ("UI_TOKEN".to_string(), token.clone()),
                     (
                         "DATA_DIR".to_string(),
@@ -319,12 +306,23 @@ fn main() {
                 quitting: AtomicBool::new(false),
             });
 
-            // The server's own output, so a bad workflow directory or a port
-            // clash explains itself instead of showing up as a blank window.
+            // The server's own output, so a bad workflow directory explains
+            // itself instead of showing up as a blank window. The port it
+            // chose comes out of the same stream.
+            let (port_tx, port_rx) = mpsc::channel::<u16>();
             tauri::async_runtime::spawn(async move {
                 while let Some(event) = rx.recv().await {
                     match event {
-                        CommandEvent::Stdout(line) | CommandEvent::Stderr(line) => {
+                        CommandEvent::Stdout(line) => {
+                            let text = String::from_utf8_lossy(&line);
+                            if let Some(port) = reported_port(&text) {
+                                // Only the first report matters; a receiver that
+                                // has gone is not an error here.
+                                let _ = port_tx.send(port);
+                            }
+                            print!("{text}");
+                        }
+                        CommandEvent::Stderr(line) => {
                             print!("{}", String::from_utf8_lossy(&line));
                         }
                         CommandEvent::Terminated(payload) => {
@@ -335,9 +333,12 @@ fn main() {
                 }
             });
 
-            if !wait_until_listening(port, Duration::from_secs(20)) {
-                return Err("the server did not start listening".into());
-            }
+            // It starts in well under a second, so the wait is normally
+            // invisible; the timeout is for the case where it never starts at
+            // all and the log is the thing worth reading.
+            let port = port_rx
+                .recv_timeout(Duration::from_secs(20))
+                .map_err(|_| "the server did not report a port")?;
 
             let api = Api {
                 client: reqwest::Client::new(),

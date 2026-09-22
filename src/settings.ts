@@ -6,12 +6,14 @@
  *
  * Upstream secrets sit in this file in plain text. That is the same exposure
  * `.env` already had — the file is local to the machine running ComfyUI and is
- * gitignored — but it means the file deserves the same care as `.env`.
+ * gitignored — but it means the file deserves the same care as `.env`, so it
+ * is written readable by its owner alone.
  */
 
-import { readFile, writeFile } from "node:fs/promises";
+import { chmod, readFile, writeFile } from "node:fs/promises";
 import { isTimeOfDay } from "./accepting";
 import { STATE_FILE } from "./config";
+import { normaliseUpstreamUrl } from "./upstream";
 
 export type UpstreamConfig = {
   /** Stable across renames, so the UI can reorder without losing identity. */
@@ -132,7 +134,15 @@ function upstreamsFromEnv(): UpstreamConfig[] {
       continue;
     }
 
-    const trimmed = url.replace(/\/$/, "");
+    let trimmed: string;
+    try {
+      trimmed = normaliseUpstreamUrl(url);
+    } catch (err) {
+      console.warn(
+        `[config] SERVER_${i}_URL skipped: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      continue;
+    }
     servers.push({
       id: `env-${i}`,
       name: process.env[`SERVER_${i}_NAME`] ?? hostFromUrl(trimmed),
@@ -210,11 +220,16 @@ function normalise(raw: unknown): Settings {
   };
 }
 
+/** Owner only. A no-op on Windows, where the per-user data folder does the job. */
+const STATE_MODE = 0o600;
+
 export async function loadSettings(): Promise<Settings> {
   if (cached) return cached;
 
   try {
     cached = normalise(JSON.parse(await readFile(STATE_FILE, "utf8")));
+    // Files written before the mode was set stay as they were until touched.
+    await chmod(STATE_FILE, STATE_MODE).catch(() => undefined);
   } catch {
     cached = normalise(null);
   }
@@ -224,7 +239,10 @@ export async function loadSettings(): Promise<Settings> {
 export async function saveSettings(patch: Partial<Settings>): Promise<Settings> {
   const next = { ...(await loadSettings()), ...patch };
   cached = next;
-  await writeFile(STATE_FILE, `${JSON.stringify(next, null, 2)}\n`);
+  // `mode` applies only when the file is created; an existing one keeps its
+  // bits, so they are set again after the write.
+  await writeFile(STATE_FILE, `${JSON.stringify(next, null, 2)}\n`, { mode: STATE_MODE });
+  await chmod(STATE_FILE, STATE_MODE).catch(() => undefined);
   return next;
 }
 

@@ -8,7 +8,7 @@ import { startProgressWatch, stopProgressWatch } from "./progress";
 import { loadSettings } from "./settings";
 import { startStatusPolling } from "./status";
 import { startUi } from "./ui/server";
-import { activeUpstreams } from "./upstream";
+import { activeUpstreams, isPrivateHost } from "./upstream";
 import { activeWorkflowName, listWorkflowNames } from "./workflow";
 
 const STATUS_POLL_MS = 5000;
@@ -22,6 +22,15 @@ const settings = await loadSettings();
 await loadJobs();
 
 console.log(`[boot] ComfyUI:   ${COMFY_URL}`);
+{
+  const comfy = new URL(COMFY_URL);
+  if (comfy.protocol === "http:" && !isPrivateHost(comfy.hostname)) {
+    console.warn(
+      `[boot] ${COMFY_URL} is plain http on a public address — prompts, input images` +
+        " and outputs cross the network in the clear",
+    );
+  }
+}
 console.log(`[boot] Workflows: ${WORKFLOW_DIR}`);
 if (settings.comfyDir) console.log(`[boot] ComfyUI dir: ${settings.comfyDir}`);
 
@@ -43,6 +52,8 @@ startProgressWatch();
 
 if (UI_ENABLED) {
   const server = startUi();
+  // The desktop shell starts this process with `UI_PORT=0` and reads the port
+  // it was given back from this line, so the wording is part of the contract.
   console.log(`[boot] Management UI on http://${server.hostname}:${server.port}`);
 }
 

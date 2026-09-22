@@ -42,7 +42,7 @@ and the interesting inputs are detected from the graph itself:
 
 | Parameter    | How it is found                                                            |
 | ------------ | -------------------------------------------------------------------------- |
-| `image`      | the first `LoadImage`-style node                                           |
+| `images`     | every `LoadImage`-style node, in node-id order; images go in that order    |
 | `positive`   | follow a sampler's `positive` link back to the node holding the text       |
 | `negative`   | same, via the `negative` link                                              |
 | `seed`       | every node with a `seed` / `noise_seed` input (all are set together)       |
@@ -50,7 +50,10 @@ and the interesting inputs are detected from the graph itself:
 | `frameRate`  | a node with a numeric `frame_rate` input                                    |
 
 Outputs are not detected in advance — whatever ComfyUI reports in its history
-for the run is collected, so images, videos and gifs all work.
+for the run is collected, so images, videos and gifs all work. A node that
+reports a value rather than a file — ComfyUI's *Preview as Text*, a tagger — is
+collected the same way and handed to the job server as JSON, named by the title
+the node has in ComfyUI.
 
 ## Overriding the detection
 
@@ -60,7 +63,7 @@ sidecar file named after the workflow, `<workflow>.slots.json`:
 
 ```json
 {
-  "image": { "nodeId": "97", "input": "image" },
+  "images": [{ "nodeId": "97", "input": "image" }, { "nodeId": "98", "input": "image" }],
   "positive": { "nodeId": "129:93", "input": "text" },
   "negative": { "nodeId": "129:89", "input": "text" },
   "seed": [{ "nodeId": "129:86", "input": "noise_seed" }]
@@ -68,7 +71,8 @@ sidecar file named after the workflow, `<workflow>.slots.json`:
 ```
 
 Only the keys you list are overridden; the rest stay auto-detected. Set a key to
-`null` to disable that parameter entirely. The management UI shows the resolved
+`null` to disable that parameter entirely. `image` — the older single form —
+still works and means a one-item `images`. The management UI shows the resolved
 mapping for every workflow, so you can check the result without a test run.
 
 ---

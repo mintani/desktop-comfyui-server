@@ -32,13 +32,30 @@ export type RunOutput = {
 };
 
 /**
+ * What a node reported for the run besides files: a *Preview as Text* node's
+ * `text`, a tagger's `tags`, a scorer's number. Kept exactly as ComfyUI
+ * recorded it — the workflow's author knows what each node means, and the
+ * node's title is how they tell one from another.
+ */
+export type RunData = {
+  nodeId: string;
+  /** The node's title in the workflow, or its class when it has none. */
+  label: string;
+  /** Every key the node reported that is not a list of files. */
+  values: Record<string, unknown>;
+};
+
+/**
  * Parameters a caller may override on a run. Every field is optional: a field
  * left out keeps whatever the workflow file already had, and a field whose slot
  * was not detected in that workflow is silently ignored.
  */
 export type RunParams = {
-  /** Filename as returned by ComfyUI's `/upload/image`, not a local path. */
-  imageFilename?: string;
+  /**
+   * Input images as ComfyUI's `/upload/image` named them, not local paths, in
+   * the order the workflow's image loaders take them.
+   */
+  imageFilenames?: string[];
   positivePrompt?: string;
   negativePrompt?: string;
   /** Applied to every detected seed input. Randomised when omitted. */
@@ -48,6 +65,7 @@ export type RunParams = {
   fps?: number;
 };
 
+/** "ui" no longer occurs in new jobs; it survives in histories written by older versions. */
 export type JobSource = "ui" | "upstream";
 
 export type JobState = "running" | "succeeded" | "failed";
@@ -55,7 +73,7 @@ export type JobState = "running" | "succeeded" | "failed";
 export type JobRecord = {
   id: string;
   source: JobSource;
-  /** Upstream server name for claimed jobs; undefined for UI test runs. */
+  /** Upstream server the job was claimed from; absent in older histories. */
   origin?: string;
   workflow: string;
   state: JobState;
@@ -63,6 +81,8 @@ export type JobRecord = {
   finishedAt?: number;
   promptId?: string;
   outputs?: RunOutput[];
+  /** Values the run reported besides files; absent when there were none. */
+  data?: RunData[];
   error?: string;
   /** Tries this job has had on this machine; absent means the first. */
   attempts?: number;
@@ -75,8 +95,8 @@ export type JobRecord = {
 
 /**
  * A workflow shipped inside the claim itself by the upstream server. The JSON is
- * API format; placeholders (`__INPUT_IMAGE__`, `__TRIGGER_WORDS__`, `__SEED__`)
- * are substituted here before queueing.
+ * API format; placeholders (`__INPUT_IMAGE__` and `__INPUT_IMAGE_2__` …,
+ * `__TRIGGER_WORDS__`, `__SEED__`) are substituted here before queueing.
  */
 export type ServerWorkflow = {
   presetId: string;
@@ -84,12 +104,18 @@ export type ServerWorkflow = {
   triggerWords: string | null;
 };
 
+/** One input image as a claim carries it. */
+export type SourceImage = {
+  base64: string;
+  contentType: string;
+};
+
 /** Job payload handed out by an upstream server's claim endpoint. */
 export type ClaimedJob = {
   jobId: string;
   userId: string;
-  sourceImageBase64: string;
-  sourceImageContentType: string;
+  /** In the order the workflow's image loaders take them; empty for none. */
+  sourceImages: SourceImage[];
   /** Optional per-job overrides; upstreams that don't send these get defaults. */
   params?: RunParams;
   /**

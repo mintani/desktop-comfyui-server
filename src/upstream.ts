@@ -2,27 +2,38 @@
  * Optional integration with a job server.
  *
  * With no upstreams configured the process runs standalone: the management UI
- * still works and runs workflows locally. Add one or more from the Servers page
- * (or seed them with `SERVER_n_*` in `.env`) and the agent additionally claims
- * queued jobs from them, asking the highest-priority server first.
+ * still works and manages ComfyUI locally. Add one or more from the Servers
+ * page (or seed them with `SERVER_n_*` in `.env`) and the agent additionally
+ * claims queued jobs from them, asking the highest-priority server first.
  *
- * The protocol is four endpoints under `/api/internal/hosts/:hostId`, all
+ * The protocol is five endpoints under `/api/internal/hosts/:hostId`, all
  * authenticated with `Authorization: Bearer <secret>`:
  *
  * - `POST /heartbeat`                 — report ComfyUI status, may return `{ pendingJobs }`
  * - `POST /jobs/claim`                — take the next job, or 204 when idle
  * - `POST /jobs/:jobId/result`        — upload the produced file as the raw body
- * - `POST /jobs/:jobId/complete`      — mark done
+ * - `POST /jobs/:jobId/complete`      — mark done, with `{ data }`: what the run reported besides files
  * - `POST /jobs/:jobId/fail`          — mark failed with `{ reason }`
  *
  * Linking adds one more, outside the per-host block and unauthenticated
  * because the code it takes is itself the credential:
  *
  * - `POST /api/internal/hosts/link`     — trade a one-time code for `{ hostId, hostSecret }`
+ *
+ * Everything a server answers with is checked before it is used. A job server
+ * is trusted to hand out work, not to shape this process's memory, its file
+ * names, or the page the user is looking at.
  */
 
 import type { Settings, UpstreamConfig } from "./settings";
-import type { ClaimedJob, ComfyStatusResult } from "./types";
+import type {
+  ClaimedJob,
+  ComfyStatusResult,
+  RunData,
+  RunParams,
+  ServerWorkflow,
+  SourceImage,
+} from "./types";
 
 export type UpstreamServer = {
   /** Log label; defaults to the URL host when `*_NAME` is unset. */
@@ -33,13 +44,92 @@ export type UpstreamServer = {
   secret: string;
 };
 
+// ---------------------------------------------------------------------------
+// What a server is allowed to be
+// ---------------------------------------------------------------------------
+
+/**
+ * Hosts that plain `http://` may be used for: this machine, a private network,
+ * or a name with no domain in it, which only a local resolver can answer. The
+ * secret rides on every request as a bearer token, so anything that could
+ * cross the open internet has to be `https://`.
+ */
+export function isPrivateHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host === "::1") return true;
+  if (!host.includes(".") && !host.includes(":")) return true;
+  if (/\.(local|lan|internal|home\.arpa)$/.test(host)) return true;
+
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    return (
+      a === 127 ||
+      a === 10 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 169 && b === 254)
+    );
+  }
+  // fc00::/7 and fe80::/10.
+  return /^f[cd][0-9a-f]{2}:/.test(host) || /^fe[89ab][0-9a-f]:/.test(host);
+}
+
+/**
+ * Check and tidy a job server URL as typed, saved, linked or read from `.env`.
+ * Returns the URL without its trailing slash, or throws with the reason in
+ * words the UI can show.
+ */
+export function normaliseUpstreamUrl(raw: string): string {
+  const trimmed = raw.trim().replace(/\/$/, "");
+  if (!trimmed) throw new Error("a server URL is required");
+
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    throw new Error(`not a URL: "${trimmed}"`);
+  }
+
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error("the server URL must start with https:// (or http:// on a private network)");
+  }
+  if (url.protocol === "http:" && !isPrivateHost(url.hostname)) {
+    throw new Error(
+      `${url.host} is not on a private network — use https://, the secret travels on every request`,
+    );
+  }
+  if (url.username || url.password) {
+    throw new Error("the server URL must not carry a username or password");
+  }
+  if (url.search || url.hash) {
+    throw new Error("the server URL must not have a query string or fragment");
+  }
+  return trimmed;
+}
+
 /**
  * The enabled upstreams, in the order the UI put them. That order is the
  * priority: `claimNext` walks it from the top every cycle.
+ *
+ * A stored URL is checked again here, not only when it was saved: a settings
+ * file written before plain `http://` was restricted must not keep sending the
+ * secret in the clear just because nobody has touched that row since.
  */
 export function activeUpstreams(settings: Settings): UpstreamServer[] {
   return settings.upstreams
     .filter((server) => server.enabled && server.url && server.hostId && server.secret)
+    .filter((server) => {
+      try {
+        normaliseUpstreamUrl(server.url);
+        return true;
+      } catch (err) {
+        console.warn(
+          `[config] ${server.name || server.url} skipped: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return false;
+      }
+    })
     .map(toServer);
 }
 
@@ -51,6 +141,64 @@ function toServer(config: UpstreamConfig): UpstreamServer {
     secret: config.secret,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Reading what a server sends back
+// ---------------------------------------------------------------------------
+
+/** Enough for any answer in this protocol except a claim, which carries images. */
+const SMALL_BODY_LIMIT = 64 * 1024;
+/** A claim holds its input images as base64; this allows for a couple of large ones. */
+const CLAIM_BODY_LIMIT = 64 * 1024 * 1024;
+
+/**
+ * Parse a JSON body no larger than `limit` bytes. `res.json()` on its own would
+ * read whatever the server chose to send; a hostile or broken one could take
+ * the process down with a single response.
+ */
+export async function readJson(res: Response, limit: number): Promise<unknown> {
+  const declared = Number(res.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > limit) {
+    throw new Error(`response too large (${declared} bytes)`);
+  }
+  if (!res.body) throw new Error("empty response");
+
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for await (const chunk of res.body) {
+    size += chunk.byteLength;
+    if (size > limit) throw new Error(`response too large (over ${limit} bytes)`);
+    chunks.push(chunk);
+  }
+  return JSON.parse(new TextDecoder().decode(Buffer.concat(chunks)));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * Ids end up in request paths, in file names handed to ComfyUI and in the job
+ * history, so they are held to what an id looks like rather than escaped at
+ * each of those places.
+ */
+const SAFE_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
+
+function encodePath(hostId: string, ...rest: string[]): string {
+  return [hostId, ...rest].map(encodeURIComponent).join("/");
+}
+
+// ---------------------------------------------------------------------------
+// Linking
+// ---------------------------------------------------------------------------
 
 export type LinkedHost = {
   hostId: string;
@@ -77,16 +225,26 @@ export async function claimLinkCode(url: string, code: string): Promise<LinkedHo
   });
 
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error ?? `the server refused the code: HTTP ${res.status}`);
+    const body = await readJson(res, SMALL_BODY_LIMIT).catch(() => null);
+    const reason = isRecord(body) ? optionalString(body.error) : undefined;
+    throw new Error(reason ?? `the server refused the code: HTTP ${res.status}`);
   }
 
-  const linked = (await res.json()) as Partial<LinkedHost>;
-  if (!linked.hostId || !linked.hostSecret) {
+  const linked = await readJson(res, SMALL_BODY_LIMIT);
+  if (!isRecord(linked) || !linked.hostId || !linked.hostSecret) {
     throw new Error("the server accepted the code but sent no credentials");
   }
-  return { hostId: linked.hostId, hostSecret: linked.hostSecret, hostName: linked.hostName };
+  const hostId = optionalString(linked.hostId);
+  const hostSecret = optionalString(linked.hostSecret);
+  if (!hostId || !SAFE_ID.test(hostId)) throw new Error("the server sent an unusable host id");
+  if (!hostSecret) throw new Error("the server sent an unusable secret");
+
+  return { hostId, hostSecret, hostName: optionalString(linked.hostName) };
 }
+
+// ---------------------------------------------------------------------------
+// Heartbeat
+// ---------------------------------------------------------------------------
 
 function authHeaders(server: UpstreamServer): Record<string, string> {
   return {
@@ -100,22 +258,31 @@ export type HeartbeatAck = {
   pendingJobs?: number;
 };
 
+/** Only the field this side knows, and only when it is a number. */
+function toAck(body: unknown): HeartbeatAck {
+  const pending = isRecord(body) ? optionalNumber(body.pendingJobs) : undefined;
+  return pending === undefined ? {} : { pendingJobs: pending };
+}
+
 export async function sendHeartbeat(
   server: UpstreamServer,
-  status: ComfyStatusResult,
+  status: ComfyStatusResult & { readyModels?: string[] },
 ): Promise<HeartbeatAck | null> {
   try {
-    const res = await fetch(`${server.url}/api/internal/hosts/${server.hostId}/heartbeat`, {
-      method: "POST",
-      headers: authHeaders(server),
-      body: JSON.stringify(status),
-      signal: AbortSignal.timeout(10_000),
-    });
+    const res = await fetch(
+      `${server.url}/api/internal/hosts/${encodePath(server.hostId)}/heartbeat`,
+      {
+        method: "POST",
+        headers: authHeaders(server),
+        body: JSON.stringify(status),
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
     if (!res.ok) {
       console.error(`[heartbeat] ${server.name} rejected: HTTP ${res.status}`);
       return null;
     }
-    return (await res.json()) as HeartbeatAck;
+    return toAck(await readJson(res, SMALL_BODY_LIMIT));
   } catch (err) {
     console.error(`[heartbeat] ${server.name} error:`, err instanceof Error ? err.message : err);
     return null;
@@ -149,12 +316,15 @@ export async function testUpstream(
   const started = Date.now();
 
   try {
-    const res = await fetch(`${server.url}/api/internal/hosts/${server.hostId}/heartbeat`, {
-      method: "POST",
-      headers: authHeaders(server),
-      body: JSON.stringify(status),
-      signal: AbortSignal.timeout(10_000),
-    });
+    const res = await fetch(
+      `${server.url}/api/internal/hosts/${encodePath(server.hostId)}/heartbeat`,
+      {
+        method: "POST",
+        headers: authHeaders(server),
+        body: JSON.stringify(status),
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
     const ms = Date.now() - started;
 
     if (!res.ok) {
@@ -165,8 +335,8 @@ export async function testUpstream(
         error: reason ? `HTTP ${res.status} ${reason}` : `HTTP ${res.status}`,
       };
     }
-    const ack = (await res.json()) as HeartbeatAck;
-    return { ok: true, ms, pendingJobs: ack.pendingJobs };
+    const ack = toAck(await readJson(res, SMALL_BODY_LIMIT));
+    return { ok: true, ms, ...ack };
   } catch (err) {
     return {
       ok: false,
@@ -176,20 +346,106 @@ export async function testUpstream(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Jobs
+// ---------------------------------------------------------------------------
+
+/** Only the overrides this side understands, each with the type it expects. */
+function toParams(value: unknown): RunParams | undefined {
+  if (!isRecord(value)) return undefined;
+  return {
+    positivePrompt: optionalString(value.positivePrompt),
+    negativePrompt: optionalString(value.negativePrompt),
+    seed: optionalNumber(value.seed),
+    seconds: optionalNumber(value.seconds),
+    fps: optionalNumber(value.fps),
+  };
+}
+
+function toServerWorkflow(value: Record<string, unknown>): ServerWorkflow {
+  const presetId = optionalString(value.presetId);
+  const workflowJson = optionalString(value.workflowJson);
+  if (!presetId || !SAFE_ID.test(presetId)) throw new Error("workflow.presetId is not an id");
+  if (!workflowJson) throw new Error("workflow.workflowJson is not a string");
+  const triggerWords = value.triggerWords;
+  if (triggerWords !== null && triggerWords !== undefined && typeof triggerWords !== "string") {
+    throw new Error("workflow.triggerWords is not a string");
+  }
+  return { presetId, workflowJson, triggerWords: triggerWords ?? null };
+}
+
+/**
+ * The input images: `sourceImages` when the server sends it, otherwise the
+ * older single pair, which older servers still send and any server may keep
+ * sending for a one-image job. The pair with an empty string is no image.
+ */
+function toSourceImages(body: Record<string, unknown>): SourceImage[] {
+  const list = body.sourceImages;
+  if (list !== undefined && list !== null) {
+    if (!Array.isArray(list)) throw new Error("sourceImages is not an array");
+    return list.map((entry, index): SourceImage => {
+      if (!isRecord(entry)) throw new Error(`sourceImages[${index}] is not an object`);
+      const base64 = optionalString(entry.base64);
+      if (!base64) throw new Error(`sourceImages[${index}] has no base64 image`);
+      const contentType = entry.contentType ?? "image/png";
+      if (typeof contentType !== "string") {
+        throw new Error(`sourceImages[${index}].contentType is not a string`);
+      }
+      return { base64, contentType };
+    });
+  }
+
+  const image = body.sourceImageBase64 ?? "";
+  if (typeof image !== "string") throw new Error("sourceImageBase64 is not a string");
+  const contentType = body.sourceImageContentType ?? "image/png";
+  if (typeof contentType !== "string") throw new Error("sourceImageContentType is not a string");
+  return image ? [{ base64: image, contentType }] : [];
+}
+
+/**
+ * Narrow a claim to the shape this side runs. Throws on anything that is not a
+ * job, so a server that sends nonsense is logged rather than obeyed.
+ */
+export function toClaimedJob(body: unknown): ClaimedJob {
+  if (!isRecord(body)) throw new Error("claim is not an object");
+
+  const jobId = optionalString(body.jobId);
+  if (!jobId || !SAFE_ID.test(jobId)) throw new Error("claim has no usable jobId");
+
+  const sourceImages = toSourceImages(body);
+
+  let workflow: ClaimedJob["workflow"];
+  if (body.workflow === undefined || body.workflow === null) workflow = null;
+  else if (typeof body.workflow === "string") workflow = body.workflow;
+  else if (isRecord(body.workflow)) workflow = toServerWorkflow(body.workflow);
+  else throw new Error("workflow is neither a name nor a workflow");
+
+  return {
+    jobId,
+    userId: optionalString(body.userId) ?? "",
+    sourceImages,
+    params: toParams(body.params),
+    workflow,
+  };
+}
+
 export async function claimJob(server: UpstreamServer): Promise<ClaimedJob | null> {
   try {
-    const res = await fetch(`${server.url}/api/internal/hosts/${server.hostId}/jobs/claim`, {
-      method: "POST",
-      headers: authHeaders(server),
-      signal: AbortSignal.timeout(10_000),
-    });
+    const res = await fetch(
+      `${server.url}/api/internal/hosts/${encodePath(server.hostId, "jobs", "claim")}`,
+      {
+        method: "POST",
+        headers: authHeaders(server),
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
 
     if (res.status === 204) return null;
     if (!res.ok) {
       console.error(`[claim] ${server.name} rejected: HTTP ${res.status}`);
       return null;
     }
-    return (await res.json()) as ClaimedJob;
+    return toClaimedJob(await readJson(res, CLAIM_BODY_LIMIT));
   } catch (err) {
     console.error(`[claim] ${server.name} error:`, err instanceof Error ? err.message : err);
     return null;
@@ -197,8 +453,9 @@ export async function claimJob(server: UpstreamServer): Promise<ClaimedJob | nul
 }
 
 /**
- * Stream the produced file from ComfyUI up to the job server. The host never
- * holds object-storage credentials; the upstream stores it and derives the key.
+ * Stream the produced file from ComfyUI up to the job server, without holding
+ * it in memory on the way: a video runs to gigabytes. The host never holds
+ * object-storage credentials; the upstream stores it and derives the key.
  */
 export async function uploadResult(
   server: UpstreamServer,
@@ -206,34 +463,54 @@ export async function uploadResult(
   fileUrl: string,
 ): Promise<void> {
   const fileRes = await fetch(fileUrl, { signal: AbortSignal.timeout(60_000) });
-  if (!fileRes.ok) throw new Error(`fetching the output failed: HTTP ${fileRes.status}`);
+  if (!fileRes.ok || !fileRes.body) {
+    throw new Error(`fetching the output failed: HTTP ${fileRes.status}`);
+  }
   const contentType = fileRes.headers.get("content-type") ?? "application/octet-stream";
-  const bytes = new Uint8Array(await fileRes.arrayBuffer());
+  const contentLength = fileRes.headers.get("content-length");
 
   const res = await fetch(
-    `${server.url}/api/internal/hosts/${server.hostId}/jobs/${jobId}/result`,
+    `${server.url}/api/internal/hosts/${encodePath(server.hostId, "jobs", jobId, "result")}`,
     {
       method: "POST",
-      headers: { Authorization: `Bearer ${server.secret}`, "Content-Type": contentType },
-      body: bytes,
+      headers: {
+        Authorization: `Bearer ${server.secret}`,
+        "Content-Type": contentType,
+        ...(contentLength ? { "Content-Length": contentLength } : {}),
+      },
+      body: fileRes.body,
       signal: AbortSignal.timeout(120_000),
     },
   );
   if (!res.ok) {
-    const message = await res.text().catch(() => String(res.status));
+    const message = (await res.text().catch(() => "")).slice(0, REASON_LIMIT) || String(res.status);
     throw new Error(`uploading the result failed: HTTP ${res.status} ${message}`);
   }
 }
 
 /**
+ * Mark the job done, handing over what its nodes reported besides files — a
+ * score, a tag list — as `{ data }`. Sent whether or not a file went before it,
+ * so a server that only stores pictures can ignore the body and a server that
+ * asked for a verdict finds it here.
+ *
  * Swallowing a failure here would strand the job: the upstream keeps it in the
  * assigned state, and claim only hands out pending ones, so it is never retried.
  * Throw and let the caller report it as a failure instead.
  */
-export async function reportComplete(server: UpstreamServer, jobId: string): Promise<void> {
+export async function reportComplete(
+  server: UpstreamServer,
+  jobId: string,
+  data: RunData[],
+): Promise<void> {
   const res = await fetch(
-    `${server.url}/api/internal/hosts/${server.hostId}/jobs/${jobId}/complete`,
-    { method: "POST", headers: authHeaders(server), signal: AbortSignal.timeout(10_000) },
+    `${server.url}/api/internal/hosts/${encodePath(server.hostId, "jobs", jobId, "complete")}`,
+    {
+      method: "POST",
+      headers: authHeaders(server),
+      body: JSON.stringify({ data }),
+      signal: AbortSignal.timeout(10_000),
+    },
   );
   if (!res.ok) throw new Error(`complete rejected: HTTP ${res.status}`);
 }
@@ -249,7 +526,7 @@ export async function reportFailure(
 ): Promise<void> {
   try {
     const res = await fetch(
-      `${server.url}/api/internal/hosts/${server.hostId}/jobs/${jobId}/fail`,
+      `${server.url}/api/internal/hosts/${encodePath(server.hostId, "jobs", jobId, "fail")}`,
       {
         method: "POST",
         headers: authHeaders(server),

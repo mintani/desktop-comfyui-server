@@ -59,7 +59,7 @@ function slotRefs(slots: WorkflowSlots): Set<string> {
   const add = (slot: Slot | null) => {
     if (slot) refs.add(`${slot.nodeId}:${slot.input}`);
   };
-  add(slots.image);
+  for (const image of slots.images) add(image);
   add(slots.positive);
   add(slots.negative);
   add(slots.length);

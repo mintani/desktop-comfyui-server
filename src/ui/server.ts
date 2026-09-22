@@ -1,18 +1,10 @@
 import { MAX_PAUSE_MINUTES, acceptState, isTimeOfDay, pauseUntil } from "../accepting";
 import { agentSnapshot, applyUpstreamChange } from "../agent";
-import { interrupt, uploadImage, viewUrl } from "../comfy";
+import { interrupt, viewUrl } from "../comfy";
 import { comfyProcessState, startComfy, stopComfy } from "../comfy-process";
 import { COMFY_URL, UI_HOSTNAME, UI_PORT, UI_TOKEN, WORKFLOW_DIR } from "../config";
 import { listEvents } from "../events";
-import {
-  clearFinishedJobs,
-  completeJob,
-  failJob,
-  listJobs,
-  markQueued,
-  removeJob,
-  startJob,
-} from "../jobs";
+import { clearFinishedJobs, listJobs, removeJob } from "../jobs";
 import { outputsSnapshot, rescanOutputs, trimOutputs } from "../outputs";
 import { latestProgress } from "../progress";
 import {
@@ -30,17 +22,14 @@ import {
   clearWorkflowCache,
   deleteWorkflowFile,
   listWorkflows,
-  loadWorkflow,
-  runWorkflow,
   saveWorkflowFile,
   setActiveWorkflow,
 } from "../workflow";
-import { claimLinkCode, testUpstream } from "../upstream";
+import { claimLinkCode, normaliseUpstreamUrl, testUpstream } from "../upstream";
 import { checkWorkflow } from "../validate";
-import { authorise } from "./guard";
+import { authorise, sessionCookie } from "./guard";
 import index from "./index.html";
 import type { AcceptSchedule, RunMode, UpstreamConfig } from "../settings";
-import type { RunParams } from "../types";
 
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -160,8 +149,9 @@ async function handleUpstreamsSave(req: Request): Promise<Response> {
 
     const upstreams = body.upstreams.map((input, position): UpstreamConfig => {
       const previous = input.id ? existing.get(input.id) : undefined;
-      const url = (input.url ?? previous?.url ?? "").trim().replace(/\/$/, "");
-      if (!url) throw new Error(`server ${position + 1} needs a URL`);
+      const given = (input.url ?? previous?.url ?? "").trim();
+      if (!given) throw new Error(`server ${position + 1} needs a URL`);
+      const url = normaliseUpstreamUrl(given);
 
       const hostId = (input.hostId ?? previous?.hostId ?? "").trim();
       if (!hostId) throw new Error(`${url} needs a host id`);
@@ -204,8 +194,7 @@ async function handleUpstreamTest(req: Request): Promise<Response> {
       ? settings.upstreams.find((server) => server.id === input.id)
       : undefined;
 
-    const url = (input.url ?? stored?.url ?? "").trim().replace(/\/$/, "");
-    if (!url) return fail("a URL is needed");
+    const url = normaliseUpstreamUrl(input.url ?? stored?.url ?? "");
     const hostId = (input.hostId ?? stored?.hostId ?? "").trim();
     if (!hostId) return fail("a host id is needed");
     const secret = (input.secret ?? "").trim() || stored?.secret || "";
@@ -233,12 +222,8 @@ async function handleUpstreamTest(req: Request): Promise<Response> {
 async function handleLink(req: Request): Promise<Response> {
   try {
     const body = (await req.json()) as { url?: string; code?: string };
-    const url = (body.url ?? "").trim().replace(/\/$/, "");
+    const url = normaliseUpstreamUrl(body.url ?? "");
     const code = (body.code ?? "").trim();
-
-    if (!url) return fail("a server URL is required");
-    if (!/^https?:\/\//i.test(url))
-      return fail("the server URL must start with http:// or https://");
     if (!code) return fail("a link code is required");
 
     const linked = await claimLinkCode(url, code);
@@ -491,65 +476,35 @@ function handleJobsClear(): Response {
 }
 
 // ---------------------------------------------------------------------------
-// Running
+// Outputs
 // ---------------------------------------------------------------------------
 
 /**
- * Start a run and return immediately with the job id. Generation takes minutes,
- * far longer than a request should stay open, so progress is read back through
- * `/api/state`.
+ * Hand the page its token as a cookie. The token arrives on this request as a
+ * bearer header — the page got it from the address it was opened with — and
+ * leaves as `HttpOnly`, so from here on nothing running in the page can read
+ * it, and no URL has to carry it.
  */
-async function handleRun(req: Request): Promise<Response> {
-  try {
-    if ((await loadSettings()).mode === "paused") return fail("new work is paused", 409);
+function handleSession(): Response {
+  return Response.json(
+    { ok: true },
+    { headers: UI_TOKEN ? { "Set-Cookie": sessionCookie() } : {} },
+  );
+}
 
-    const form = await req.formData();
+/** ComfyUI's three folders. Anything else is not a place outputs come from. */
+const VIEW_TYPES = new Set(["output", "input", "temp"]);
 
-    const text = (key: string): string | undefined => {
-      const value = form.get(key);
-      return typeof value === "string" && value.trim() !== "" ? value : undefined;
-    };
-    const number = (key: string): number | undefined => {
-      const raw = text(key);
-      if (raw === undefined) return undefined;
-      const parsed = Number(raw);
-      return Number.isFinite(parsed) ? parsed : undefined;
-    };
+/**
+ * Types the browser may render inline. Anything else ComfyUI hands back — a
+ * file a workflow wrote, whatever it was — is offered as a download, so it can
+ * never run as a page on this origin. SVG is the one image that can carry a
+ * script when opened on its own, so it is a download too.
+ */
+const INLINE_TYPES = /^(image|video|audio)\/[\w.+-]+$/i;
 
-    const name = text("workflow") ?? (await activeWorkflowName());
-    if (!name) return fail("no workflow selected");
-
-    // Parse before starting anything, so a broken file answers the request with
-    // the reason instead of logging a job that was doomed from the start.
-    await loadWorkflow(name);
-
-    const params: RunParams = {
-      positivePrompt: text("positive"),
-      negativePrompt: text("negative"),
-      seed: number("seed"),
-      seconds: number("seconds"),
-      fps: number("fps"),
-    };
-
-    const image = form.get("image");
-    if (image instanceof File && image.size > 0) {
-      params.imageFilename = await uploadImage(
-        COMFY_URL,
-        image.name || "input.png",
-        image.type || "image/png",
-        new Uint8Array(await image.arrayBuffer()),
-      );
-    }
-
-    const job = startJob({ id: crypto.randomUUID(), source: "ui", workflow: name });
-    void runWorkflow(name, params, (promptId) => markQueued(job, promptId))
-      .then((outputs) => completeJob(job, outputs))
-      .catch((err) => failJob(job, message(err)));
-
-    return Response.json({ jobId: job.id });
-  } catch (err) {
-    return fail(err);
-  }
+function servesInline(contentType: string): boolean {
+  return INLINE_TYPES.test(contentType) && contentType.toLowerCase() !== "image/svg+xml";
 }
 
 /**
@@ -563,18 +518,25 @@ async function handleOutput(req: Request): Promise<Response> {
   const filename = params.get("filename");
   if (!filename) return fail("filename is required");
 
+  const type = params.get("type") ?? "output";
+  if (!VIEW_TYPES.has(type)) return fail("type must be output, input or temp");
+
   const target = viewUrl(COMFY_URL, {
     filename,
     subfolder: params.get("subfolder") ?? "",
-    type: params.get("type") ?? "output",
+    type,
   });
 
   try {
     const upstream = await fetch(target, { signal: AbortSignal.timeout(60_000) });
+    const served = upstream.headers.get("content-type")?.split(";")[0]?.trim() ?? "";
+    const inline = servesInline(served);
     return new Response(upstream.body, {
       status: upstream.status,
       headers: {
-        "Content-Type": upstream.headers.get("content-type") ?? "application/octet-stream",
+        "Content-Type": inline ? served : "application/octet-stream",
+        ...(inline ? {} : { "Content-Disposition": "attachment" }),
+        "X-Content-Type-Options": "nosniff",
         "Cache-Control": "no-store",
       },
     });
@@ -608,6 +570,7 @@ export function startUi() {
     routes: {
       "/": index,
       "/api/state": { GET: guarded(handleState) },
+      "/api/session": { POST: guarded(handleSession) },
 
       "/api/workflows/active": { POST: guarded(handleSetActive) },
       "/api/workflows/reload": { POST: guarded(handleReload) },
@@ -631,7 +594,6 @@ export function startUi() {
       "/api/jobs/delete": { POST: guarded(handleJobDelete) },
       "/api/jobs/clear": { POST: guarded(handleJobsClear) },
 
-      "/api/run": { POST: guarded(handleRun) },
       "/api/interrupt": { POST: guarded(handleInterrupt) },
       "/api/output": { GET: guarded(handleOutput) },
     },

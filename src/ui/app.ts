@@ -15,7 +15,7 @@ type RunMode = "accepting" | "local" | "paused";
 type Slot = { nodeId: string; input: string; label: string };
 
 type WorkflowSlots = {
-  image: Slot | null;
+  images: Slot[];
   positive: Slot | null;
   negative: Slot | null;
   seed: Slot[];
@@ -40,9 +40,15 @@ type RunOutput = {
   kind: "image" | "video" | "audio" | "file";
 };
 
+/** A value a node reported besides files, as ComfyUI recorded it. */
+type RunData = {
+  nodeId: string;
+  label: string;
+  values: Record<string, unknown>;
+};
+
 type JobRecord = {
   id: string;
-  source: "ui" | "upstream";
   origin?: string;
   workflow: string;
   state: "running" | "succeeded" | "failed";
@@ -50,6 +56,7 @@ type JobRecord = {
   finishedAt?: number;
   promptId?: string;
   outputs?: RunOutput[];
+  data?: RunData[];
   error?: string;
   /** Tries this job has had on this machine; absent means the first. */
   attempts?: number;
@@ -123,7 +130,7 @@ type State = {
 };
 
 const POLL_MS = 2000;
-const PAGES = ["workflows", "comfyui", "servers", "accepting", "generate"] as const;
+const PAGES = ["workflows", "comfyui", "servers", "accepting", "runs"] as const;
 type Page = (typeof PAGES)[number];
 
 function el<T extends HTMLElement>(id: string): T {
@@ -146,10 +153,7 @@ const nodes = {
   linkCode: el<HTMLInputElement>("link-code"),
   linkNote: el("link-note"),
   jobs: el("jobs"),
-  form: el<HTMLFormElement>("run-form"),
-  select: el<HTMLSelectElement>("run-workflow"),
-  submit: el<HTMLButtonElement>("run-submit"),
-  note: el("run-note"),
+  jobsNote: el("jobs-note"),
   reload: el<HTMLButtonElement>("reload"),
   interrupt: el<HTMLButtonElement>("interrupt"),
   uploadForm: el<HTMLFormElement>("upload-form"),
@@ -231,34 +235,44 @@ function minutesLeft(until: number): number {
 }
 
 /**
- * The shared secret, when the server was started with one. Handed over once as
- * `?token=…` on the address, then kept here so the address can be tidied up.
+ * The shared secret, when the server was started with one. It arrives once as
+ * `?token=…` on the address and is traded straight away for an `HttpOnly`
+ * cookie, so nothing in this page holds it afterwards: not a variable, not
+ * storage, not a URL. Older versions kept it in `localStorage`; a token found
+ * there is traded in the same way and then removed.
  */
-const TOKEN_KEY = "ui-token";
+const LEGACY_TOKEN_KEY = "ui-token";
 
-function readToken(): string {
+function takeToken(): string {
   const fromUrl = new URLSearchParams(location.search).get("token");
-  if (fromUrl) {
-    try {
-      localStorage.setItem(TOKEN_KEY, fromUrl);
-    } catch {
-      // Private mode — it lasts for this tab only.
-    }
-    history.replaceState(null, "", location.pathname + location.hash);
-    return fromUrl;
-  }
+  if (fromUrl) history.replaceState(null, "", location.pathname + location.hash);
 
+  let stored = "";
   try {
-    return localStorage.getItem(TOKEN_KEY) ?? "";
+    stored = localStorage.getItem(LEGACY_TOKEN_KEY) ?? "";
+    localStorage.removeItem(LEGACY_TOKEN_KEY);
   } catch {
-    return "";
+    // Private mode — nothing was kept, so there is nothing to trade.
   }
+  return fromUrl || stored;
 }
 
-let token = readToken();
-
-function authHeaders(): Record<string, string> {
-  return token ? { Authorization: `Bearer ${token}` } : {};
+/**
+ * Hand the token to the server and let the cookie it sets carry every request
+ * from here on. Without a token there is nothing to trade; the server either
+ * needs none, or the first poll will say so.
+ */
+async function establishSession(): Promise<void> {
+  const token = takeToken();
+  if (!token) return;
+  try {
+    await fetch("/api/session", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  } catch {
+    // The poll that follows reports the server as unreachable.
+  }
 }
 
 function outputUrl(output: RunOutput): string {
@@ -267,8 +281,6 @@ function outputUrl(output: RunOutput): string {
     subfolder: output.subfolder,
     type: output.type,
   });
-  // An <img> or <video> cannot carry a header, so this one goes in the URL.
-  if (token) query.set("token", token);
   return `/api/output?${query}`;
 }
 
@@ -279,10 +291,7 @@ async function post<T = unknown>(
   try {
     const res = await fetch(path, {
       method: "POST",
-      headers: {
-        ...authHeaders(),
-        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-      },
+      headers: body === undefined ? {} : { "Content-Type": "application/json" },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     const parsed = (await res.json().catch(() => ({}))) as { error?: string } & T;
@@ -316,8 +325,8 @@ function setNote(target: HTMLElement, text: string, isError = false): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Workflows is the landing tab; running a workflow by hand is the sideline.
- * Any hash naming no tab lands there too — the old `#/settings` included.
+ * Workflows is the landing tab. Any hash naming no tab lands there too — the
+ * old `#/settings` and `#/generate` included.
  */
 function currentPage(): Page {
   const hash = location.hash.replace(/^#\/?/, "");
@@ -450,17 +459,20 @@ function slotTags(summary: WorkflowSummary): string {
   const overridden = new Set(summary.overridden ?? []);
 
   const entries: [string, boolean][] = [
-    ["image", Boolean(slots.image)],
+    ["images", slots.images.length > 0],
     ["positive", Boolean(slots.positive)],
     ["negative", Boolean(slots.negative)],
     ["seed", slots.seed.length > 0],
     ["length", Boolean(slots.length)],
     ["frameRate", Boolean(slots.frameRate)],
   ];
+  // The slots that come in numbers, said with the number: how many pictures a
+  // job may send, how many seeds a run pins.
+  const counts: Record<string, number> = { images: slots.images.length, seed: slots.seed.length };
 
   const tags = entries.map(([key, present]) => {
     const cls = overridden.has(key) ? "tag over" : present ? "tag on" : "tag";
-    const suffix = key === "seed" && present ? ` ×${slots.seed.length}` : "";
+    const suffix = present && counts[key] ? ` ×${counts[key]}` : "";
     const title = overridden.has(key)
       ? t("slot.override")
       : present
@@ -569,7 +581,9 @@ function heartbeatFor(state: State, row: ServerRow): string {
   const beat = live.heartbeat;
   if (!beat) return `<span class="state"><span class="dot"></span>${t("servers.waiting")}</span>`;
   const waiting =
-    beat.pendingJobs === undefined ? "" : ` · ${t("servers.queued", { count: beat.pendingJobs })}`;
+    typeof beat.pendingJobs === "number"
+      ? ` · ${t("servers.queued", { count: esc(beat.pendingJobs) })}`
+      : "";
   return `<span class="state"><span class="dot ${beat.ok ? "ok" : "bad"}"></span>${
     beat.ok ? t("servers.up") : t("servers.down")
   }${waiting}</span>`;
@@ -586,10 +600,10 @@ function testResultFor(row: ServerRow): string {
     })}</p>`;
   }
   const queued =
-    row.test.pendingJobs === undefined
-      ? ""
-      : ` · ${t("servers.queued", { count: row.test.pendingJobs })}`;
-  return `<p class="meta">${t("servers.testOk", { ms: row.test.ms })}${queued}</p>`;
+    typeof row.test.pendingJobs === "number"
+      ? ` · ${t("servers.queued", { count: esc(row.test.pendingJobs) })}`
+      : "";
+  return `<p class="meta">${t("servers.testOk", { ms: esc(row.test.ms) })}${queued}</p>`;
 }
 
 function renderServers(state: State): void {
@@ -730,6 +744,21 @@ function renderOutputs(outputs: RunOutput[]): string {
   return `<div class="outputs">${media}</div>`;
 }
 
+/**
+ * What the run reported besides files, one row per node: its title, then the
+ * values as the JSON a job server receives them in, so what a server will see
+ * can be read off here without one.
+ */
+function renderData(data: RunData[]): string {
+  const rows = data
+    .map(
+      (entry) =>
+        `<dt>${esc(entry.label)}</dt><dd><code>${esc(JSON.stringify(entry.values))}</code></dd>`,
+    )
+    .join("");
+  return `<dl class="data">${rows}</dl>`;
+}
+
 function jobStateLabel(state: JobRecord["state"]): string {
   if (state === "running") return t("jobs.running");
   if (state === "succeeded") return t("jobs.succeeded");
@@ -758,17 +787,16 @@ function progressBar(job: JobRecord, progress: State["progress"]): string {
   return `<div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}">
       <span style="width: ${percent}%"></span>
     </div>
-    <p class="meta">${t("jobs.progress", { percent, value: progress.value, max: progress.max })}${
+    <p class="meta">${t("jobs.progress", { percent, value: esc(progress.value), max: esc(progress.max) })}${
       progress.node ? ` · ${t("jobs.node", { node: esc(progress.node) })}` : ""
     }</p>`;
 }
 
 function jobEntry(job: JobRecord, withDelete: boolean, progress: State["progress"]): string {
   const tone = job.state === "running" ? "run" : job.state === "succeeded" ? "ok" : "bad";
-  const origin =
-    job.source === "upstream"
-      ? ` · ${esc(job.origin ?? t("jobs.upstream"))}`
-      : ` · ${t("jobs.ui")}`;
+  // Which job server the job was claimed from. Rows written by old versions'
+  // in-app run form have no origin, so they simply say nothing.
+  const origin = job.origin ? ` · ${esc(job.origin)}` : "";
   const timing =
     job.state === "running"
       ? `<span data-started="${job.startedAt}">${formatDuration(Date.now() - job.startedAt)}</span>`
@@ -793,16 +821,15 @@ function jobEntry(job: JobRecord, withDelete: boolean, progress: State["progress
     ${progressBar(job, progress)}
     ${jobError(job)}
     ${job.outputs?.length ? renderOutputs(job.outputs) : ""}
+    ${job.data?.length ? renderData(job.data) : ""}
   </div>`;
 }
 
 // Page-local: the history itself is what it is, only its reading is chosen.
 type JobStateFilter = "all" | JobRecord["state"];
-type JobSourceFilter = "all" | JobRecord["source"];
 type JobsView = "list" | "gallery";
 
 let jobStateFilter: JobStateFilter = "all";
-let jobSourceFilter: JobSourceFilter = "all";
 let jobsView: JobsView = "list";
 
 /**
@@ -835,11 +862,7 @@ function galleryHtml(jobs: JobRecord[]): string {
 }
 
 function renderJobs(state: State): void {
-  const jobs = state.jobs.filter(
-    (job) =>
-      (jobStateFilter === "all" || job.state === jobStateFilter) &&
-      (jobSourceFilter === "all" || job.source === jobSourceFilter),
-  );
+  const jobs = state.jobs.filter((job) => jobStateFilter === "all" || job.state === jobStateFilter);
 
   if (jobsView === "gallery") {
     renderIfChanged(nodes.jobs, "jobs", galleryHtml(jobs));
@@ -1170,58 +1193,6 @@ async function setNotify(on: boolean): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Run form
-// ---------------------------------------------------------------------------
-
-let selectKey = "";
-
-function syncForm(state: State): void {
-  const valid = state.workflows.filter((summary) => summary.valid).map((summary) => summary.name);
-  const key = valid.join(" ");
-
-  // Assigning a value the select has no option for silently blanks it, which
-  // would then read back as "no workflow" — so only ever pick from `valid`.
-  const pick = (...candidates: (string | null)[]): string =>
-    candidates.find((name): name is string => name !== null && valid.includes(name)) ??
-    valid[0] ??
-    "";
-
-  if (key !== selectKey) {
-    selectKey = key;
-    const previous = nodes.select.value;
-    nodes.select.innerHTML = valid
-      .map((name) => `<option value="${esc(name)}">${esc(name)}</option>`)
-      .join("");
-    nodes.select.value = pick(previous, state.activeWorkflow);
-  } else if (!valid.includes(nodes.select.value)) {
-    nodes.select.value = pick(state.activeWorkflow);
-  }
-
-  const paused = state.mode === "paused";
-  nodes.submit.disabled = valid.length === 0 || paused;
-  nodes.submit.title = paused ? t("run.paused") : "";
-
-  const selected = state.workflows.find((summary) => summary.name === nodes.select.value);
-  const slots = selected?.slots;
-
-  for (const field of document.querySelectorAll<HTMLElement>("[data-slot]")) {
-    const slotKey = field.dataset["slot"];
-    if (!slotKey) continue;
-    const present = !slots
-      ? false
-      : slotKey === "seed"
-        ? slots.seed.length > 0
-        : Boolean(slots[slotKey as keyof WorkflowSlots]);
-
-    field.classList.toggle("disabled", !present);
-    // Disabled controls are left out of FormData, which is what we want: a
-    // parameter with no slot must not be sent at all.
-    const input = field.querySelector<HTMLInputElement | HTMLTextAreaElement>("input, textarea");
-    if (input) input.disabled = !present;
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Polling
 // ---------------------------------------------------------------------------
 
@@ -1241,12 +1212,11 @@ function render(state: State): void {
   syncAccepting(state);
   syncDesktop(state);
   syncNotify(state);
-  syncForm(state);
 }
 
 async function poll(): Promise<void> {
   try {
-    const res = await fetch("/api/state", { headers: authHeaders() });
+    const res = await fetch("/api/state");
     if (res.status === 401) {
       renderIfChanged(
         nodes.vitals,
@@ -1339,7 +1309,7 @@ onLangChange(() => {
   // Notes report something that has already happened, so they are cleared
   // rather than translated after the fact.
   for (const note of [
-    nodes.note,
+    nodes.jobsNote,
     nodes.uploadNote,
     nodes.settingsNote,
     nodes.serversNote,
@@ -1359,39 +1329,8 @@ onLangChange(() => {
 // Wiring
 // ---------------------------------------------------------------------------
 
-nodes.form.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  nodes.submit.disabled = true;
-  setNote(nodes.note, t("run.queueing"));
-
-  try {
-    const res = await fetch("/api/run", {
-      method: "POST",
-      headers: authHeaders(),
-      body: new FormData(nodes.form),
-    });
-    const body = (await res.json()) as { jobId?: string; error?: string };
-    if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
-    setNote(nodes.note, t("run.queued"));
-  } catch (err) {
-    setNote(nodes.note, err instanceof Error ? err.message : String(err), true);
-  } finally {
-    nodes.submit.disabled = false;
-    void poll();
-  }
-});
-
-// The selector doubles as the active workflow, so upstream jobs follow it too.
-nodes.select.addEventListener("change", async () => {
-  const name = nodes.select.value;
-  if (!name) return;
-  await post("/api/workflows/active", { name });
-  void poll();
-});
-
 nodes.reload.addEventListener("click", async () => {
   await post("/api/workflows/reload");
-  selectKey = "";
   lastHtml.clear();
   setNote(nodes.uploadNote, t("upload.reloaded"));
   void poll();
@@ -1400,8 +1339,8 @@ nodes.reload.addEventListener("click", async () => {
 nodes.interrupt.addEventListener("click", async () => {
   const result = await post("/api/interrupt");
   setNote(
-    nodes.note,
-    result.ok ? t("run.interruptSent") : (result.error ?? t("run.interruptFailed")),
+    nodes.jobsNote,
+    result.ok ? t("jobs.interruptSent") : (result.error ?? t("jobs.interruptFailed")),
     !result.ok,
   );
   void poll();
@@ -1421,11 +1360,7 @@ nodes.uploadForm.addEventListener("submit", async (event) => {
 
   setNote(nodes.uploadNote, t("upload.uploading"));
   try {
-    const res = await fetch("/api/workflows/upload", {
-      method: "POST",
-      headers: authHeaders(),
-      body: form,
-    });
+    const res = await fetch("/api/workflows/upload", { method: "POST", body: form });
     const body = (await res.json()) as { workflow?: WorkflowSummary; error?: string };
     if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
     setNote(nodes.uploadNote, t("upload.saved", { name: body.workflow?.name ?? "" }));
@@ -1457,7 +1392,6 @@ nodes.workflows.addEventListener("click", async (event) => {
   if (remove && confirm(t("workflows.deleteConfirm", { name: remove }))) {
     const result = await post("/api/workflows/delete", { name: remove });
     if (!result.ok) setNote(nodes.uploadNote, result.error ?? t("workflows.deleteFailed"), true);
-    selectKey = "";
     lastHtml.delete("workflows");
     void poll();
   }
@@ -1588,7 +1522,6 @@ nodes.jobs.addEventListener("click", async (event) => {
 function syncJobFilterButtons(): void {
   const groups: [attribute: string, current: string][] = [
     ["data-job-state", jobStateFilter],
-    ["data-job-source", jobSourceFilter],
     ["data-job-view", jobsView],
   ];
   for (const [attribute, current] of groups) {
@@ -1598,7 +1531,7 @@ function syncJobFilterButtons(): void {
   }
 }
 
-/** The three groups differ only in which variable a click sets. */
+/** The two groups differ only in which variable a click sets. */
 function wireJobFilter(id: string, attribute: string, apply: (value: string) => void): void {
   el(id).addEventListener("click", (event) => {
     const value = (event.target as HTMLElement)
@@ -1613,9 +1546,6 @@ function wireJobFilter(id: string, attribute: string, apply: (value: string) => 
 
 wireJobFilter("jobs-state", "data-job-state", (value) => {
   jobStateFilter = value as JobStateFilter;
-});
-wireJobFilter("jobs-source", "data-job-source", (value) => {
-  jobSourceFilter = value as JobSourceFilter;
 });
 wireJobFilter("jobs-view", "data-job-view", (value) => {
   jobsView = value as JobsView;
@@ -1763,5 +1693,8 @@ nodes.notifyEnabled.checked = notifyOn() && notifyGranted();
 applyTheme(currentTheme());
 setLang(lang());
 showPage();
-void poll();
-setInterval(() => void poll(), POLL_MS);
+// The cookie has to be in place before the first request that needs it.
+void establishSession().then(() => {
+  void poll();
+  setInterval(() => void poll(), POLL_MS);
+});

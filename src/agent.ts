@@ -27,7 +27,8 @@ import {
 import { fetchManifest, getReadyModels, reportObjectInfo, syncModels } from "./models";
 import { activeWorkflowName, runServerWorkflow, runWorkflow } from "./workflow";
 import type { UpstreamServer } from "./upstream";
-import type { ClaimedJob } from "./types";
+import type { RunResult } from "./workflow";
+import type { ClaimedJob, SourceImage } from "./types";
 
 type HeartbeatState = {
   ok: boolean;
@@ -59,6 +60,50 @@ export function agentSnapshot() {
 
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * The image types ComfyUI's input folder is for, and the extension each gets.
+ * The claim names a type but does not get to name the file: anything else
+ * uploads as PNG, which ComfyUI either reads or rejects, and never as a page.
+ */
+const INPUT_IMAGE_TYPES: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/webp": "webp",
+  "image/gif": "gif",
+};
+
+function inputImageType(declared: string): { contentType: string; ext: string } {
+  const contentType = declared.split(";")[0]?.trim().toLowerCase() ?? "";
+  const ext = INPUT_IMAGE_TYPES[contentType];
+  return ext ? { contentType, ext } : { contentType: "image/png", ext: "png" };
+}
+
+/**
+ * Push the claim's images into ComfyUI's input folder, in order. The names
+ * repeat across attempts and the upload overwrites, so a retry cannot litter
+ * the folder; ComfyUI has the last word on a name, so what it answers is what
+ * the workflow is given.
+ */
+async function uploadInputs(jobId: string, images: SourceImage[]): Promise<string[]> {
+  const filenames: string[] = [];
+  for (const [index, image] of images.entries()) {
+    const { contentType, ext } = inputImageType(image.contentType);
+    filenames.push(
+      await uploadImage(
+        COMFY_URL,
+        `input_${jobId}_${index + 1}.${ext}`,
+        contentType,
+        Buffer.from(image.base64, "base64"),
+      ),
+    );
+  }
+  if (filenames.length > 0) {
+    console.log(`[worker] uploaded input image(s) → ${filenames.join(", ")}`);
+  }
+  return filenames;
 }
 
 async function sendHeartbeats() {
@@ -104,6 +149,19 @@ async function claimNext(): Promise<{ server: UpstreamServer; job: ClaimedJob } 
   return null;
 }
 
+/**
+ * Hand a finished run to the server it was claimed from. Upstreams take a
+ * single artefact: video workflows also emit preview images, so a playable
+ * file wins over whatever happens to come first. A run that reported values
+ * and no file — a scoring workflow — has nothing to upload and goes straight
+ * to `complete`, which carries the values either way.
+ */
+async function deliver(server: UpstreamServer, jobId: string, result: RunResult): Promise<void> {
+  const primary = result.outputs.find((output) => output.kind === "video") ?? result.outputs[0];
+  if (primary) await uploadResult(server, jobId, primary.url);
+  await reportComplete(server, jobId, result.data);
+}
+
 async function processJob(server: UpstreamServer, claimed: ClaimedJob) {
   // A workflow object rides inside the claim: run that,
   // not a local file. Strings and absence keep the existing local-file path.
@@ -129,42 +187,22 @@ async function processJob(server: UpstreamServer, claimed: ClaimedJob) {
 
   // A transient failure — a network blip, ComfyUI mid-restart — gets retried
   // on this machine before the job server hears anything: the job is claimed
-  // and would not be handed out again anyway. Only claimed jobs retry; a run
-  // from the UI has someone watching it, who would not expect a quiet rerun.
+  // and would not be handed out again anyway.
   const tries = 1 + JOB_RETRIES;
 
   for (let attempt = 1; ; attempt++) {
     if (attempt > 1) noteAttempt(job, attempt);
 
     try {
-      let imageFilename: string | undefined;
-      if (claimed.sourceImageBase64) {
-        const contentType = claimed.sourceImageContentType || "image/png";
-        const ext = contentType.split("/")[1] ?? "png";
-        // The name repeats across attempts and the upload overwrites, so a
-        // retry cannot litter ComfyUI's input folder.
-        imageFilename = await uploadImage(
-          COMFY_URL,
-          `input_${claimed.jobId}.${ext}`,
-          contentType,
-          Buffer.from(claimed.sourceImageBase64, "base64"),
-        );
-        console.log(`[worker] uploaded input image → ${imageFilename}`);
-      }
-
-      const outputs = await runWorkflow(
+      const imageFilenames = await uploadInputs(claimed.jobId, claimed.sourceImages);
+      const result = await runWorkflow(
         workflowName,
-        { ...claimed.params, imageFilename },
+        { ...claimed.params, imageFilenames },
         (promptId) => markQueued(job, promptId),
       );
+      await deliver(server, claimed.jobId, result);
 
-      // Upstreams expect a single artefact. Video workflows also emit preview
-      // images, so prefer a playable file over whatever happens to come first.
-      const primary = outputs.find((output) => output.kind === "video") ?? outputs[0]!;
-      await uploadResult(server, claimed.jobId, primary.url);
-      await reportComplete(server, claimed.jobId);
-
-      completeJob(job, outputs);
+      completeJob(job, result.outputs, result.data);
       console.log(`[worker] job ${claimed.jobId} completed`);
       return;
     } catch (err) {
@@ -203,27 +241,13 @@ async function processServerWorkflowJob(
   });
 
   try {
-    let imageFilename: string | undefined;
-    if (claimed.sourceImageBase64) {
-      const contentType = claimed.sourceImageContentType || "image/png";
-      const ext = contentType.split("/")[1] ?? "png";
-      imageFilename = await uploadImage(
-        COMFY_URL,
-        `input_${claimed.jobId}.${ext}`,
-        contentType,
-        Buffer.from(claimed.sourceImageBase64, "base64"),
-      );
-    }
-
-    const outputs = await runServerWorkflow(spec, imageFilename, (promptId) =>
+    const imageFilenames = await uploadInputs(claimed.jobId, claimed.sourceImages);
+    const result = await runServerWorkflow(spec, imageFilenames, (promptId) =>
       markQueued(job, promptId),
     );
+    await deliver(server, claimed.jobId, result);
 
-    const primary = outputs.find((output) => output.kind === "video") ?? outputs[0]!;
-    await uploadResult(server, claimed.jobId, primary.url);
-    await reportComplete(server, claimed.jobId);
-
-    completeJob(job, outputs);
+    completeJob(job, result.outputs, result.data);
     console.log(`[worker] job ${claimed.jobId} completed`);
   } catch (err) {
     const reason = message(err);
