@@ -25,7 +25,7 @@ import {
   saveWorkflowFile,
   setActiveWorkflow,
 } from "../workflow";
-import { claimLinkCode, testUpstream } from "../upstream";
+import { claimLinkCode, normaliseUpstreamUrl, testUpstream } from "../upstream";
 import { checkWorkflow } from "../validate";
 import { authorise, sessionCookie } from "./guard";
 import index from "./index.html";
@@ -149,8 +149,9 @@ async function handleUpstreamsSave(req: Request): Promise<Response> {
 
     const upstreams = body.upstreams.map((input, position): UpstreamConfig => {
       const previous = input.id ? existing.get(input.id) : undefined;
-      const url = (input.url ?? previous?.url ?? "").trim().replace(/\/$/, "");
-      if (!url) throw new Error(`server ${position + 1} needs a URL`);
+      const given = (input.url ?? previous?.url ?? "").trim();
+      if (!given) throw new Error(`server ${position + 1} needs a URL`);
+      const url = normaliseUpstreamUrl(given);
 
       const hostId = (input.hostId ?? previous?.hostId ?? "").trim();
       if (!hostId) throw new Error(`${url} needs a host id`);
@@ -193,8 +194,7 @@ async function handleUpstreamTest(req: Request): Promise<Response> {
       ? settings.upstreams.find((server) => server.id === input.id)
       : undefined;
 
-    const url = (input.url ?? stored?.url ?? "").trim().replace(/\/$/, "");
-    if (!url) return fail("a URL is needed");
+    const url = normaliseUpstreamUrl(input.url ?? stored?.url ?? "");
     const hostId = (input.hostId ?? stored?.hostId ?? "").trim();
     if (!hostId) return fail("a host id is needed");
     const secret = (input.secret ?? "").trim() || stored?.secret || "";
@@ -222,12 +222,8 @@ async function handleUpstreamTest(req: Request): Promise<Response> {
 async function handleLink(req: Request): Promise<Response> {
   try {
     const body = (await req.json()) as { url?: string; code?: string };
-    const url = (body.url ?? "").trim().replace(/\/$/, "");
+    const url = normaliseUpstreamUrl(body.url ?? "");
     const code = (body.code ?? "").trim();
-
-    if (!url) return fail("a server URL is required");
-    if (!/^https?:\/\//i.test(url))
-      return fail("the server URL must start with http:// or https://");
     if (!code) return fail("a link code is required");
 
     const linked = await claimLinkCode(url, code);
